@@ -5,6 +5,8 @@ import {
   updateWorkOrder,
   deleteWorkOrder,
 } from "@/lib/mock-data/store";
+import { WorkOrderStatus } from "@/types/work-order";
+import { syncCompletionToGhl } from "@/lib/ghl/sync-completion";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -67,7 +69,16 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     );
   }
 
-  return NextResponse.json({ data: updateResult.data });
+  const updatedWo = updateResult.data;
+
+  // Fire-and-forget GHL sync on completion. Not awaited so the HTTP response
+  // is not held open waiting for an external API call. In a serverless
+  // deployment wrap this with waitUntil() to prevent premature context teardown.
+  if (updatedWo.status === WorkOrderStatus.COMPLETED) {
+    void syncCompletionToGhl(updatedWo);
+  }
+
+  return NextResponse.json({ data: updatedWo });
 }
 
 // ---------------------------------------------------------------------------

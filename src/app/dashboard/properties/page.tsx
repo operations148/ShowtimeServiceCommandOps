@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import { Plus } from "lucide-react";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { PropertiesTable } from "@/components/dashboard/PropertiesTable";
+import { NewPropertyButton } from "@/components/dashboard/NewPropertyButton";
 
 export const metadata: Metadata = { title: "Properties" };
 
@@ -16,13 +16,7 @@ export default function PropertiesPage() {
             Service addresses, pool equipment records, and access notes.
           </p>
         </div>
-        <button
-          type="button"
-          className="flex shrink-0 items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2"
-        >
-          <Plus className="h-4 w-4" />
-          Add Property
-        </button>
+        <NewPropertyButton />
       </div>
 
       <PropertiesTable />

@@ -1,12 +1,13 @@
 # MEMORY.md — ServiceOps Command Center
 
-_Last updated: Phase 3 — property detail page built (2026-05-04). Update after every major decision or build phase._
+_Last updated: estimate-flagged → GHL task sync wired to visits PATCH (2026-05-05)._
 
 ## Product Identity
 - **Name**: ServiceOps Command Center
 - **Type**: GHL-integrated work order and field operations SaaS
 - **First client**: Showtime Pool Service, California
 - **Future vision**: White-label Jobber-style add-on for GHL users
+- **GitHub repo**: https://github.com/Eriin2816/service-command-ops.git (initial commit pushed 2026-05-05)
 
 ## Build Phase Status
 | Phase | Description | Status |
@@ -15,26 +16,34 @@ _Last updated: Phase 3 — property detail page built (2026-05-04). Update after
 | 1 | MVP UI Shell + Navigation | ✅ Done |
 | 1b | Technician Mobile Shell (/tech/today) | ✅ Done |
 | 2 | Work Order Module | ✅ Done (list + detail + New WO modal, mock data + API) |
-| 3 | Property Profile Module | 🔄 In Progress (types + spec + list + detail + API done; Add Property form pending) |
-| 4 | Technician Mobile View (full) | ⏳ Pending |
-| 5 | GHL Webhook Intake | ⏳ Pending |
-| 6 | Status Sync Back to GHL | ⏳ Pending |
+| 3 | Property Profile Module | ✅ Done (types + list + detail + API + Add Property form) |
+| 4 | Technician Mobile View (full) | ✅ Done (today list + job detail + checklist + visits API + completion flow) |
+| 5 | GHL Webhook Intake | 🔄 In Progress (mapping docs ✅, HMAC verification ✅, OpportunityStatusChange processing ✅, QA script ✅) |
+| 6 | Status Sync Back to GHL | 🔄 In Progress (GHL client ✅, completion sync ✅, retry queue placeholder ✅, estimate task sync ✅) |
 | 7 | Reporting Dashboard | ⏳ Pending |
 | 8 | QA and Launch | ⏳ Pending |
 
+## Confirmed Decisions (Phase 4 — Tech Mobile)
+- **Tech today page uses real types**: `WorkOrderWithRelations` from `@/types/work-order` — no local placeholder types. 3 jobs (wo-001, wo-002, wo-003) sorted by `scheduled_time_start`.
+- **Server/client split on job detail**: `page.tsx` is a server component that fetches WO, property, checklist template, and creates the visit via `getOrCreateVisit`. `JobDetail.tsx` is `'use client'` and owns all interactive state.
+- **Visit created server-side on page load**: `getOrCreateVisit(workOrderId, ...)` is idempotent per `work_order_id`. The visit ID is passed to the client as a prop.
+- **globalThis anchor on visit store**: `visit-store.ts` stores its array on `globalThis.__visitStore` to survive Next.js module re-instantiations in dev mode. Without this, the API route sees a different `store` array than the server component.
+- **JobDetail state machine**: 6 phases: `idle → warn_incomplete → submitting → done_complete` OR `idle → estimate_prompt → submitting → done_estimate`. No modals for the warning (inline in action bar). Bottom sheet for estimate prompt.
+- **Checklist template fallback**: `checklistTemplates` only covers 6 of 10 `ServiceCategory` values. `FALLBACK_ITEMS` (6 generic items) is used for `equipment_installation`, `new_construction`, `pool_inspection_diagnostic`, `other`.
+- **Completion confirmation is full-page replacement** (not a banner on top of the job detail). Summary shows checked/total items and whether notes were added. Timer-stamped. "Back to Today's Jobs" is the only action.
+
 ## Confirmed Decisions (Phase 3 — Properties)
-- **Equipment storage**: `pool_equipment` stored as JSONB on `properties` table — one snapshot of current state, not history. Equipment replacement history is out of scope until Phase 4+.
-- **`ghl_contact_id` is optional**: properties can exist without a GHL link (manual entry, import before integration). Three paths to set it: webhook intake, manual paste, or unset.
-- **`gate_code` is a separate field**: split from `access_notes` so technicians can see it at a glance without reading free text. Plain text in Phase 3 — flag for encryption in Phase 8 security hardening.
-- **`customer_name` does not auto-sync with GHL**: it's the operational display name and may drift. Manual correction is acceptable for Phase 3.
-- **`PropertyWithRelations`**: adds `active_work_order_count` (non-terminal WOs only), `last_service_date`, `last_service_technician_name` — computed when DB is wired, hardcoded in mock data.
-- **Soft delete only**: `is_active = false` — never hard-delete a property. Work order history must survive.
+- **Equipment storage**: `pool_equipment` stored as JSONB on `properties` table — one snapshot of current state, not history.
+- **`ghl_contact_id` is optional**: properties can exist without a GHL link.
+- **`gate_code` is a separate field**: split from `access_notes` for at-a-glance visibility. Plain text in Phase 3.
+- **`customer_name` does not auto-sync with GHL**: manual correction acceptable for Phase 3.
+- **`PropertyWithRelations`**: adds `active_work_order_count`, `last_service_date`, `last_service_technician_name` — computed at DB time, hardcoded in mock.
+- **Soft delete only**: `is_active = false` — never hard-delete a property.
 
 ## Confirmed Decisions (Phase 2)
-- **WO number format**: `WO-XXXX` — 4-digit zero-padded sequential per tenant. e.g. `WO-0001`, `WO-0042`. No year prefix. Easy to say on the phone. Auto-expands past 9999.
-- **Multi-visit scope**: Phase 2 = work-order-as-the-job, no visible visits in UI. One visit record created silently in background per WO (zero-migration path for Phase 3). Visits layer surfaces in Phase 3. Two-trip jobs = two separate WOs for MVP.
-- **Work order spec**: `specs/feature-work-orders.md` — required fields, status lifecycle, assignment rules, estimate handoff state machine. All decisions recorded there.
-- **Status transitions**: Codified in `WORK_ORDER_STATUS_TRANSITIONS` constant in `src/types/work-order.ts`. Do not hardcode transitions elsewhere.
+- **WO number format**: `WO-XXXX` — 4-digit zero-padded. Auto-expands past 9999.
+- **Multi-visit scope**: Phase 2 = one visit per WO created silently. Visits surface in Phase 4.
+- **Status transitions**: codified in `WORK_ORDER_STATUS_TRANSITIONS` in `src/types/work-order.ts`. Do not hardcode elsewhere.
 
 ## Tech Stack (Confirmed)
 - **Framework**: Next.js 15, App Router — no Pages Router ever
@@ -45,22 +54,16 @@ _Last updated: Phase 3 — property detail page built (2026-05-04). Update after
 - **Class utility**: `cn()` from `clsx` + `tailwind-merge` — lives in `src/lib/utils/index.ts`
 - **Fonts**: `Sora` (display/headings) + `Plus Jakarta Sans` (body) via `next/font/google`
 - **Database**: Placeholder — Supabase/PostgreSQL planned, not wired yet
-- **Auth**: Placeholder — no real auth in Phase 1–2, role hardcoded as TENANT_ADMIN
+- **Auth**: Placeholder — no real auth in Phase 1–4, role hardcoded as TENANT_ADMIN
 
 ## Brand / Design Tokens (Established Phase 1)
-- **Sidebar bg**: `#0C1E2E` (deep ocean navy) — used as hex inline or via `bg-sidebar-bg`
-- **Sidebar active**: `#1A3A52` — `bg-sidebar-active`
-- **Sidebar hover**: `#132C42` — `bg-sidebar-hover`
-- **Sidebar border**: `#1E3348`
-- **Sidebar text muted**: `#94A3B8` — `text-sidebar-text`
-- **Sidebar text active**: `#F0F9FF` — `text-sidebar-text-active`
-- **Primary accent**: cyan — `brand-500` = `#06B6D4` (pool/water connection)
-- **Warning/estimate accent**: amber — `amber-500` = `#F59E0B` (California sun)
+- **Sidebar bg**: `#0C1E2E` (deep ocean navy)
+- **Primary accent**: cyan — `brand-500` = `#06B6D4`
+- **Warning/estimate accent**: amber — `amber-500` = `#F59E0B`
 - **Content bg**: `bg-background` = slate-50 via CSS var
 - **Card bg**: white with `border border-border shadow-sm rounded-xl`
-- **StatCard accent top border**: brand (cyan), amber, green (emerald), red
 
-## Status Badge Color Map (Use Consistently Across All Pages)
+## Status Badge Color Map
 | Status | Badge classes |
 |--------|--------------|
 | new | `bg-slate-100 text-slate-600` |
@@ -79,165 +82,244 @@ _Last updated: Phase 3 — property detail page built (2026-05-04). Update after
 | high | `bg-orange-50 text-orange-600` |
 | urgent | `bg-red-50 text-red-600` |
 
-## Component Architecture (Phase 1 Built)
+## Confirmed Decisions (Phase 3 — Add Property Form)
+- **Pattern**: `NewPropertyButton.tsx` + `NewPropertyModal.tsx` — identical shape to `NewWorkOrderButton` + `NewWorkOrderModal`. Button owns modal open state + 6s success banner. Modal is a slide-over drawer.
+- **Form fields**: Customer Name, Street Address, Apt/Unit, City/State/ZIP (5-col grid), Gate Code (mono font), Access Notes, Service Notes. Pool equipment deliberately excluded — too complex for creation; handled via inline edit on detail page.
+- **Pool equipment note**: Shown as a footer callout inside the form: "Pool equipment can be added after creation on the property detail page."
+- **State validation**: `city/state/zip` in a `grid-cols-5` layout — city 2 cols, state 1 col, zip 2 cols. State input uppercases and truncates to 2 chars inline (`toUpperCase().slice(0, 2)`).
+- **Success callback**: `onSuccess(id: string, name: string)` — banner shows customer name, not a WO number.
+- **POST target**: `/api/properties` — existing route, no changes needed.
+
+## Confirmed Decisions (Phase 5 — GHL Webhook)
+- **Signature header**: `x-ghl-signature` (hex digest). Verified with `timingSafeEqual` — length checked first to avoid panic.
+- **Dev bypass**: If `GHL_WEBHOOK_SECRET` is unset, signature check is skipped with a warning. Hard-reject in production once the var is set.
+- **Dispatch pattern**: `dispatch(payload)` switch on `payload.type` inside the route handler. Processing errors caught and swallowed — GHL always gets 200 after signature passes.
+- **TypeScript exhaustiveness**: Default branch in `dispatch()` casts to `never` — fires a compile-time error if a new type is added to `GHLWebhookPayload` without a handler.
+- **`createWorkOrderFromGHL` result type**: `{ outcome: "created" | "already_exists" | "skipped" | "error", workOrder? }` discriminated union. Caller pattern-matches to log; never throws.
+- **Stage gate**: `isJobReadyStage(stageName, ghlStatus)` — configurable via `GHL_JOB_READY_STAGES` env (comma-separated substrings), defaults to `scheduled`, `confirmed`, `in progress`, `job ready`, `assigned`. `won` always passes. `lost`/`abandoned` always fail.
+- **Service category resolution order**: custom field `GHL_CF_OPP_SERVICE_CAT` (exact enum match) → stage name keyword table → `other`.
+- **Custom field key asymmetry**: Contact events → `customField: [{id, value}]`. Opportunity events → `customFields: [{id, fieldValue}]`. Separate extraction helpers: `extractContactCustomField` vs `extractOppCustomField`.
+- **Idempotency**: `findByGhlOpportunityId(ghlOpportunityId, tenantId)` in store — checked before creation. On duplicate → `already_exists` outcome, existing WorkOrder returned.
+- **Missing property**: If `contact.id` has no matching Property (`findPropertyByGhlContactId`), log warning + skip. Contact webhook may still be in flight — production would queue retry.
+- **`createWorkOrderFull`**: New store function accepting full `CreateWorkOrderInput` + denormalized `propertyAddress` + `propertyCustomerName`. Used only by GHL processing path; UI form still uses `createWorkOrder(NewWorkOrderInput)`.
+
+## Component Architecture
 ### Layout Components — `src/components/layout/`
-- `DashboardShell.tsx` — client component, manages `mobileNavOpen` state, wraps all `/dashboard/*`
-- `Sidebar.tsx` — server-compatible, ocean-navy sidebar, logo + nav + Settings pinned bottom + tenant badge
-- `SidebarNavItem.tsx` — `'use client'`, uses `usePathname()` for active state, cyan left-border indicator on active
-- `TopBar.tsx` — `'use client'`, derives page title from pathname map, hamburger (mobile only), bell + avatar
-- `MobileNav.tsx` — `'use client'`, slide-in drawer with backdrop, Escape key + body scroll lock
-- `TechShell.tsx` — separate mobile-only layout for `/tech/*`, no sidebar, high-contrast outdoor design
-- `Breadcrumb.tsx` — server component; accepts `BreadcrumbItem[]` (`label` + optional `href`); Home icon always links to `/dashboard/overview`; last item has `aria-current="page"` and is non-linked; `ChevronRight` separator
+- `DashboardShell.tsx` — client, manages `mobileNavOpen`, wraps all `/dashboard/*`
+- `Sidebar.tsx` — server-compatible, ocean-navy, logo + nav + Settings pinned bottom
+- `SidebarNavItem.tsx` — `'use client'`, uses `usePathname()` for active state
+- `TopBar.tsx` — `'use client'`, page title from pathname map, hamburger, bell + avatar
+- `MobileNav.tsx` — `'use client'`, slide-in drawer with backdrop, Escape + scroll lock
+- `TechShell.tsx` — mobile-only layout for `/tech/*`, no sidebar, high-contrast design
+- `Breadcrumb.tsx` — server; accepts `BreadcrumbItem[]`; Home icon links to `/dashboard/overview`
 
 ### Dashboard Components — `src/components/dashboard/`
-- `StatCard.tsx` — 4 accent variants (brand/amber/green/red), colored top border, icon badge, trend text
-- `WorkOrdersTable.tsx` — `'use client'`; status + category filter dropdowns; 8-column table; links to detail page
-- `WorkOrderDetail.tsx` — `'use client'`; receives `workOrder` prop; local status/estimateHandoff state; status transition select + Estimate Needed button; SectionCard + Field sub-components; GHL links section; Estimate Handoff card
-- `NewWorkOrderModal.tsx` — slide-over drawer; Zod client-side validation; priority segment control; POSTs to `/api/work-orders`; success state → auto-close
-- `NewWorkOrderButton.tsx` — `'use client'` wrapper keeping `work-orders/page.tsx` a server component; owns modal open state + success banner (6s auto-dismiss)
-- `PropertiesTable.tsx` — `'use client'`; real-time `useMemo` search (name + address + city) + active/inactive filter; 7-column table with avatar initials, GHL indicator, WO count badge, equipment badge
-- `PropertyDetail.tsx` — `'use client'`; receives `property: PropertyWithRelations` + `relatedWorkOrders` props; per-section inline edit (equipment, access notes, service notes); draft state pattern with start/save/cancel handlers; equipment edit form organized by sub-section (pump/filter/heater/sanitizer/automation); gate code shown as amber badge; WO history as mini-table linking to detail pages; New Work Order modal integration
+- `StatCard.tsx` — 4 accent variants, colored top border, icon badge, trend text
+- `WorkOrdersTable.tsx` — `'use client'`; status + category filter; 8-column table; links to detail
+- `WorkOrderDetail.tsx` — `'use client'`; local status/estimateHandoff state; status transitions; GHL links
+- `NewWorkOrderModal.tsx` — slide-over drawer; Zod validation; POSTs to `/api/work-orders`; success auto-close
+- `NewWorkOrderButton.tsx` — `'use client'` wrapper; owns modal state + success banner (6s auto-dismiss)
+- `PropertiesTable.tsx` — `'use client'`; real-time `useMemo` search + active/inactive filter; 7-column table
+- `PropertyDetail.tsx` — `'use client'`; per-section inline edit; equipment sub-forms; gate code amber badge
+- `NewPropertyModal.tsx` — `'use client'`; slide-over drawer; 9 fields; POSTs to `/api/properties`; success screen auto-closes
+- `NewPropertyButton.tsx` — `'use client'`; owns modal open state + 6s success banner with customer name
+
+### Tech Mobile Components — `src/components/tech/`
+- `JobDetail.tsx` — `'use client'`; full state machine (6 phases); PATCHes `/api/visits/[id]`; 3 fixed section types: Access card (amber), Checklist (interactive, progress bar), Notes + Photos placeholders; sticky action bar; bottom sheet for estimate prompt; two full-page completion screens.
 
 ### Route Structure Built
 ```
 src/app/
   page.tsx                         → redirect to /dashboard/overview
-  layout.tsx                       → root layout, fonts loaded here
+  layout.tsx                       → root layout, fonts
   dashboard/
-    layout.tsx                     → wraps children in DashboardShell
+    layout.tsx                     → DashboardShell
     overview/page.tsx              → KPI cards + today's jobs + alerts + tech status
-    work-orders/page.tsx           → Phase 2: ✅ work order table with filters + mock data
-    work-orders/[id]/page.tsx      → Phase 2: ✅ detail page — all fields, status dropdown, estimate flag, handoff section
-    properties/page.tsx            → Phase 3: ✅ properties table — search + active filter + 5 mock properties
-    properties/[id]/page.tsx       → Phase 3: ✅ detail page — equipment, access notes, service notes, WO history, inline edit
+    work-orders/page.tsx           → ✅ work order table with filters + mock data
+    work-orders/[id]/page.tsx      → ✅ detail — all fields, status, estimate flag, handoff
+    properties/page.tsx            → ✅ properties table — search + active filter + 5 mock properties
+    properties/[id]/page.tsx       → ✅ detail — equipment, notes, WO history, inline edit
     technicians/page.tsx           → empty state
     visits/page.tsx                → empty state
     estimates/page.tsx             → empty state
     reports/page.tsx               → empty state
-    settings/page.tsx              → 5 setting category cards, all "Coming Soon"
+    settings/page.tsx              → 5 setting categories, all "Coming Soon"
   api/
-    work-orders/route.ts           → Phase 2: ✅ GET (filters: status/category/tenant_id) + POST
-    work-orders/[id]/route.ts      → Phase 2: ✅ GET + PATCH (with transition validation) + DELETE
-    properties/route.ts            → Phase 3: ✅ GET (filter: is_active, tenant_id) + POST (Zod)
-    properties/[id]/route.ts       → Phase 3: ✅ GET + PATCH (Zod, tenant-scoped)
+    work-orders/route.ts           → ✅ GET (status/category/tenant_id filter) + POST
+    work-orders/[id]/route.ts      → ✅ GET + PATCH (transition validation) + DELETE
+    properties/route.ts            → ✅ GET (is_active, tenant_id filter) + POST (Zod)
+    properties/[id]/route.ts       → ✅ GET + PATCH (Zod, tenant-scoped)
+    visits/route.ts                → ✅ GET (6 filters) + POST (Zod) — Phase 4
+    visits/[id]/route.ts           → ✅ GET + PATCH (Zod, tenant-scoped) — Phase 4
+    ghl/webhooks/route.ts          → ✅ HMAC verification + dispatch + OpportunityStatusChange processing
   tech/
-    layout.tsx                     → wraps children in TechShell (mobile-only)
-    today/page.tsx                 → 3 placeholder job cards, date header, status badges
+    layout.tsx                     → TechShell
+    today/page.tsx                 → ✅ 3 real WO job cards (wo-001, wo-002, wo-003), sorted by time
+    job/[id]/page.tsx              → ✅ server: creates visit, passes visitId + WO + property + checklist
+    job/[id]/ (JobDetail.tsx)      → ✅ client: full interactive state machine
+    complete/page.tsx              → stub
 ```
 
-## Navigation Config (`src/config/navigation.ts`)
-- `NavItem` interface has: `label`, `href`, `icon` (Lucide name string), `roles: UserRole[]`, `pinBottom?: boolean`
-- `adminNavItems` — 8 items; Settings has `pinBottom: true`
-- `techNavItems` — 1 item (Today's Jobs)
-- Icon string → Lucide component map lives in `SidebarNavItem.tsx`
+## Confirmed Decisions (Phase 6 — Outbound GHL Sync)
+- **`WorkOrder.ghl_sync_failed?: boolean`**: added to the type. Optional so existing mock data stays compatible. `UpdateWorkOrderInput` picks it up automatically via `Partial<Omit<WorkOrder, ...>>` — no Zod schema change needed (it's an internal flag, never accepted from API clients).
+- **Fire-and-forget pattern**: `void syncCompletionToGhl(updatedWo)` in PATCH route — not awaited. HTTP response is not held open waiting for the GHL call. Production note: wrap with `waitUntil()` in serverless to prevent premature context teardown.
+- **Trigger condition**: `updatedWo.status === WorkOrderStatus.COMPLETED` — checked against the stored result, not the PATCH body, so we react to what actually happened.
+- **No GHL link → silent skip**: `syncCompletionToGhl` returns immediately if `ghl_opportunity_id` is null. Work orders created manually in ServiceOps are never pushed to GHL.
+- **Success clears the flag**: if a prior sync had set `ghl_sync_failed=true` and a subsequent call succeeds, the flag is cleared (`updateWorkOrder(id, { ghl_sync_failed: false })`).
+- **Failure sequence**: log error with status + retries → `enqueueGhlSync` → `updateWorkOrder(id, { ghl_sync_failed: true })`. All three always run in order on failure.
+- **Retry queue is in-memory only** for Phase 6. Items survive within a warm server instance but are lost on restart. A persistent queue (DB table / Redis) is needed before production. Two `console.warn` lines fire on every enqueue to make accumulation visible in dev.
+- **`GHLResult<T>`**: `{ ok: true; data: T } | { ok: false; status: number | null; error: string; retriesUsed: number }`. `status: null` means network error (no HTTP response received).
+
+## Confirmed Decisions (Phase 6 — Estimate Sync)
+- **Trigger point**: `estimate_flagged` false→true transition detected in PATCH `/api/visits/[id]` by comparing pre-update visit against updated visit. No action on repeat PATCHes where flag is already true.
+- **Work order state updated synchronously**: `updateWorkOrder(id, { status: ESTIMATE_NEEDED, estimate_handoff_status: FLAGGED })` is called in-request before the GHL fire-and-forget, so the WO reflects the estimate state even if GHL is unreachable.
+- **GHL task title format**: `"Estimate Needed — <property_address>"` — property address comes from `workOrder.property_address` (denormalized on the WO record).
+- **Task body**: `visit.technician_notes` if present, otherwise omitted.
+- **Assignee**: `process.env.GHL_DEFAULT_OFFICE_USER_ID` — may be `undefined`; GHL API handles unassigned tasks gracefully.
+- **Due date**: +24h from task creation time — hardcoded offset constant `DUE_DATE_OFFSET_MS`.
+- **No retry queue for estimate tasks**: unlike completion sync, estimate task failures are not enqueued. `estimate_handoff_status` stays `FLAGGED` — visible in dashboard — which naturally prompts office staff to retry manually or the next sync will re-attempt on a future trigger.
+- **`GHL_DEFAULT_OFFICE_USER_ID` env var**: new env var expected by `sync-estimate.ts`. Should be documented in `.env.example`.
+
+## GHL Client (`src/lib/ghl/client.ts`)
+- **Auth**: `Authorization: Bearer <token>` + `Version: 2021-07-28` (required by GHL API v2) on every request.
+- **`GHL_PRIVATE_INTEGRATION_TOKEN` missing**: immediate `{ ok: false }` result, no fetch attempted, `retriesUsed: 0`.
+- **Retry**: max 3 attempts. Retries on `{429, 500, 502, 503, 504}`. Does NOT retry 4xx client errors (except 429). Exponential backoff: base × 2^(attempt-1), capped at 10 s, +10% random jitter. Respects `Retry-After` header on 429.
+- **204 No Content**: treated as success with `data: null` — calling `res.json()` on an empty body would throw.
+- **Error extraction**: tries `json.message` → `json.msg` → `json.error` → raw text, in order. GHL uses different field names across endpoints.
+- **`updateOpportunity(id, data)`**: `PUT /opportunities/{id}`. Used by completion sync with `{ status: "won" }`.
+- **`createTask(id, taskData)`**: `POST /opportunities/{id}/tasks`. Used by estimate-flagged flow (not yet wired).
+- **`ghlFetch<T>(method, path, body?)`**: exported for future endpoints without needing new module exports.
+
+## GHL Processing Layer (`src/lib/ghl/`)
+- **`tenant-config.ts`**: `resolveTenantId(locationId)` reads `GHL_LOCATION_TO_TENANT` JSON env map. `resolveGhlUserToTechId(ghlUserId)` reads `GHL_USER_TO_TECHNICIAN`. Both return `undefined` on missing/malformed config — never throw.
+- **`map-opportunity.ts`**: Pure mapping functions (no I/O). `mapGhlStatus(ghlStatus, stageName)` — `won` → COMPLETED, `lost`/`abandoned` → CANCELLED, `open` + stage substring → intermediate status. `mapServiceCategoryFromStageName()` — ordered keyword table (specific before general; "equipment install" before "equipment"). `extractOppCustomField(fields, envKey)` — reads `fieldValue` key (not `value`). `parseGhlDate()` / `parseGhlTime()` — regex validate, return `undefined` on bad format. `mapGhlPriority()` — defaults to `normal`. `isJobReadyStage()` — configurable via `GHL_JOB_READY_STAGES` env.
+- **`create-work-order-from-ghl.ts`**: 7-step orchestrator. Steps: resolve tenant → validate required fields → stage gate → property lookup → idempotency → map fields → create. Returns `CreateWorkOrderFromGHLResult` discriminated union. All skip/error paths log and return a typed result; nothing throws.
+- **`client.ts`**: GHL API client — see GHL Client section above.
+- **`retry-queue.ts`**: In-memory retry queue. `enqueueGhlSync(item)`, `getQueueDepth()`, `getQueueSnapshot()`. `GHLSyncQueueItem` type with `id`, `type`, `ghl_opportunity_id`, `work_order_id`, `tenant_id`, `payload`, `enqueuedAt`, `attempts`, `lastError`.
+- **`sync-completion.ts`**: Outbound completion sync orchestrator. Called fire-and-forget from PATCH route on COMPLETED transition. `syncCompletionToGhl(workOrder)` — checks GHL link, calls `updateOpportunity`, handles success (clears flag) and failure (logs + enqueues + sets flag).
+- **`sync-estimate.ts`**: Outbound estimate sync orchestrator. Called fire-and-forget from PATCH `/api/visits/[id]` on `estimate_flagged` false→true transition. `syncEstimateToGhl(visit)` — looks up work order, skips if no `ghl_opportunity_id`, calls `createTask({ title: "Estimate Needed — [address]", body: technician_notes, assignedTo: GHL_DEFAULT_OFFICE_USER_ID, dueDate: +24h })`. On success: sets `estimate_handoff_status → SENT_TO_GHL`. On failure: logs + returns; status stays `FLAGGED` for dashboard visibility. Never throws.
+
+## Mock Data Store Extensions
+- **`store.ts`** additions: `findByGhlOpportunityId(ghlOpportunityId, tenantId)` for idempotency; `createWorkOrderFull(input: CreateWorkOrderInput, propertyAddress, propertyCustomerName)` for GHL-originated work orders with full field set.
+- **`property-store.ts`** addition: `findPropertyByGhlContactId(ghlContactId, tenantId)` — used in step 4 of opportunity processing.
+
+## GHL Types (`src/types/ghl.ts`)
+- Replaced placeholder with full discriminated union of 11 concrete payload interfaces.
+- `GHLContactCustomField`: `{id, value}` — used in contact events.
+- `GHLOpportunityCustomField`: `{id, fieldValue}` — used in opportunity events (different key name).
+- `GHLWebhookEventType` derived from `GHLWebhookPayload["type"]` — stays in sync automatically.
+
+## QA / Scripts
+- **`qa/ghl-webhook-test-cases.md`**: 5 test cases with exact payloads, expected HTTP codes, expected log lines, expected side effects. Uses seeded `ghl-cnt-rodriguez-001` (`prop-001`) for valid cases.
+- **`scripts/test-ghl-webhook.sh`**: Bash script using `openssl dgst -sha256 -hmac` for signing (`printf` not `echo` to avoid trailing-newline HMAC mismatch). TC-GHL-002 skipped with message if `GHL_WEBHOOK_SECRET` unset. PASSES/FAILURES counters; exits non-zero on failure (CI-compatible). Server reachability check before tests run.
+- **TC-GHL-002 wrong signature**: 64 zero hex chars — same byte-length as real SHA256, so `timingSafeEqual` actually executes rather than being short-circuited by the length guard.
+
+## Tech Mobile Patterns (Phase 4)
+- **Today page card anatomy**: time column (12h format from `HH:MM`) → timeline dot → job info (customer · service category, address split street/city-state, WO number). Entire card is a `<Link>` to `/tech/job/[id]`. Priority bar on left edge (amber=high, red=urgent). `in_progress` card gets `ring-2 ring-brand-400`.
+- **`formatTime(hhmm)` helper**: splits `HH:MM` string → `{ time: string, ampm: string }` — returns null if undefined. Used in today page and for display only.
+- **`splitAddress(full)` helper**: splits on first comma → `{ street, cityState }`.
+- **JobDetail state machine phases**:
+  - `idle` — default; all inputs enabled; action bar shows "Mark Complete" + "Estimate Needed"
+  - `warn_incomplete` — "Mark Complete" tapped with unchecked items; action bar shows warning card + "Go Back" / "Complete Anyway"
+  - `estimate_prompt` — "Estimate Needed" tapped; bottom sheet overlay with textarea (amber focus ring) + "Cancel" / "Flag Estimate"
+  - `submitting` — API call in flight; spinner in action bar; all inputs disabled
+  - `done_complete` — full-page green confirmation with circle icon, checklist summary, timestamp, "Back to Today's Jobs"
+  - `done_estimate` — full-page amber confirmation; same structure
+- **`patchVisit(payload)` in JobDetail**: `fetch("/api/visits/${visitId}", { method: "PATCH", ... })`. On failure: sets `apiError` banner (dismissible X), phase reverts to `idle`.
+- **Checklist toggles**: `setChecklist(prev => prev.map(...))` — circular toggle. Locked (pointer-events off) when phase is `submitting`, `done_complete`, or `done_estimate`.
+- **Estimate notes**: stored separately in `estimateNotes` state, combined with `notes` on submit: `[notes, estimateNotes].filter(Boolean).join("\n\n---\n\nEstimate notes:\n")`.
+
+## Visits API Layer (`src/app/api/visits/`)
+- **GET `/api/visits`**: query params: `tenant_id` (defaults to "tenant-showtime"), `work_order_id`, `property_id`, `technician_id`, `status` (validated against `VisitStatus` enum), `estimate_flagged` ("true"/"false"). Returns `{ data: Visit[], total: number }`.
+- **POST `/api/visits`**: Zod `CreateVisitSchema` — required: `work_order_id`, `property_id`, `scheduled_date` (YYYY-MM-DD). Defaults: `status = scheduled`, `checklist = []`, `photo_urls = []`, `estimate_flagged = false`. Returns 201.
+- **GET `/api/visits/[id]`**: resolves `tenant_id` from `?tenant_id=` param (defaults to "tenant-showtime"). Returns 404 if wrong tenant.
+- **PATCH `/api/visits/[id]`**: same tenant resolution. `PatchVisitSchema` — all optional: `status`, `checklist` (array of ChecklistItem), `technician_notes`, `estimate_flagged`, `completed_at`. Immutable fields (id, tenant_id, work_order_id, property_id) never overwritten. On `estimate_flagged` false→true: synchronously sets work order `status → ESTIMATE_NEEDED` + `estimate_handoff_status → FLAGGED`, then fire-and-forgets `syncEstimateToGhl(visit)`. Returns 200.
+- **`resolveTenantId(request)`** helper in `[id]/route.ts`: reads `?tenant_id=` or defaults — same pattern across all [id] routes.
+
+## Visit Store (`src/lib/mock-data/visit-store.ts`)
+- **globalThis anchor**: `g.__visitStore` and `g.__visitIdSeq` anchored to `globalThis` to survive module re-instantiations in Next.js dev mode. Critical — without this, PATCH from client hits a different store than the one populated by the server component.
+- `getOrCreateVisit(workOrderId, propertyId, technicianId, initialChecklist, tenantId)` — idempotent per `(work_order_id, tenant_id)`. Called server-side in `page.tsx`.
+- `createVisit(input, tenantId)` — called from POST API route.
+- `listVisits(filters)` — filters: `tenant_id` (required, defaults to "tenant-showtime"), `work_order_id`, `property_id`, `technician_id`, `status`, `estimate_flagged`.
+- `getVisitById(id, tenantId)` — tenant-scoped lookup.
+- `updateVisit(id, patch, tenantId)` — tenant-scoped update. Returns `VisitUpdateResult` discriminated union.
+
+## Validation Schemas (`src/lib/validation/`)
+- **`work-order.ts`**: `NewWorkOrderSchema` + `PatchWorkOrderSchema`
+- **`property.ts`**: `CreatePropertySchema` + `PatchPropertySchema` — shared equipment sub-schemas (`EquipmentItemSchema` extended per type). `optStr(maxLen)` and `optDate` helpers coerce empty strings to `undefined`.
+- **`visit.ts`**: `CreateVisitSchema` (required: work_order_id, property_id, scheduled_date; defaults for status/checklist/photo_urls/estimate_flagged) + `PatchVisitSchema` (all optional; `photo_urls` validates each entry as URL). Shared `ChecklistItemSchema` used in both.
+
+## Mock Data Files (`src/lib/mock-data/`)
+- **`work-orders.ts`** — `MOCK_WORK_ORDERS` — 5 WOs (WO-0001–0005). Read-only seed.
+- **`store.ts`** — mutable in-memory WO store. `structuredClone` seeded. `listWorkOrders`, `createWorkOrder`, `createWorkOrderFull` (GHL path), `updateWorkOrder`, `deleteWorkOrder`, `getWorkOrderById`, `findByGhlOpportunityId`.
+- **`properties.ts`** — `MOCK_PROPERTIES` — 5 properties (prop-001–005). Rich equipment data on all 5. `ghl_contact_id` set on prop-001 (`ghl-cnt-rodriguez-001`), prop-002 (`ghl-cnt-park-001`), prop-005 (`ghl-cnt-thompson-001`). prop-003 and prop-004 have no GHL link.
+- **`property-store.ts`** — mutable in-memory property store. `structuredClone` seeded. `listProperties`, `getPropertyById`, `findPropertyByGhlContactId`, `createProperty`, `updateProperty`. Preserves computed relation fields on update.
+- **`visit-store.ts`** — mutable in-memory visit store. **globalThis anchored** (not structuredClone). Starts empty; visits created on-demand by `getOrCreateVisit`. `listVisits`, `createVisit`, `getOrCreateVisit`, `getVisitById`, `updateVisit`. All operations are tenant-scoped.
+
+## GHL Integration Blueprint (Phase 5 — Docs + Code In Progress)
+
+### What's documented
+- `integration-blueprint/inbound-webhooks-from-ghl.md` — endpoint, HMAC verification, event table, error handling
+- `integration-blueprint/ghl-contact-mapping.md` — **fully documented** (2026-05-05)
+- `integration-blueprint/ghl-opportunity-mapping.md` — **fully documented** (2026-05-05)
+- `integration-blueprint/ghl-source-of-truth-rules.md` — 8 source-of-truth rules
+
+### Contact → Property mapping highlights
+- Trigger events: `ContactCreate`, `ContactUpdate`, `ContactDelete`
+- GHL `id` → `ghl_contact_id`; `locationId` → `tenant_id` via `GHL_LOCATION_TO_TENANT` env map
+- `name` → `customer_name`; `address1` → `address_line1`; `postalCode` → `zip`; `state` may need full-name → abbreviation conversion
+- Pool-specific fields (gate_code, access_notes, service_notes) come from GHL **custom fields** — IDs are account-specific, configured as env vars: `GHL_CF_GATE_CODE`, `GHL_CF_ACCESS_NOTES`, `GHL_CF_SERVICE_NOTES`
+- GHL contact `customField` format: `[{ id: "fieldId", value: "..." }]` (note: `value`, not `fieldValue`)
+- `pool_equipment` is **never populated from GHL** — ServiceOps only
+- Email, phone, tags: not stored in ServiceOps — GHL owns them
+- Upsert logic: match on `(ghl_contact_id, tenant_id)`; on update, do NOT overwrite `pool_equipment` or `is_active`
+
+### Opportunity → WorkOrder mapping highlights
+- Trigger events: `OpportunityCreate`, `OpportunityStatusChange`, `OpportunityStageUpdate`, `OpportunityAssignedToUpdate`, `OpportunityDelete`, `AppointmentBooked`
+- GHL `id` → `ghl_opportunity_id`; `contact.id` → look up Property by `ghl_contact_id` → get `property_id`
+- GHL opportunity `customFields` format: `[{ id: "fieldId", fieldValue: "..." }]` (note: `fieldValue`, not `value`)
+- **Stage gate**: not every opportunity creates a WorkOrder — only "job-ready" stages (Scheduled, In Progress, Confirmed, etc.). Lead/quote stages are discarded.
+- **Status mapping**: requires BOTH `status` (open/won/lost/abandoned) AND `pipelineStage.name`. `won` → `completed`; `lost`/`abandoned` → `cancelled`; `open` + stage name → `new`/`assigned`/`in_progress`/etc.
+- **Service category**: derived from `pipelineStage.name` via case-insensitive substring matching, OR from custom field `GHL_CF_OPP_SERVICE_CAT` (takes precedence)
+- **Scheduled time**: comes from custom fields `GHL_CF_OPP_SCHEDULED_DATE` (YYYY-MM-DD), `GHL_CF_OPP_TIME_START`, `GHL_CF_OPP_TIME_END` (HH:MM 24h)
+- **Priority**: from custom field `GHL_CF_OPP_PRIORITY` — defaults to `normal`
+- **GHL user → tech lookup**: `GHL_USER_TO_TECHNICIAN` env map (JSON object of GHL user IDs → ServiceOps technician IDs)
+- **AppointmentBooked**: slightly different payload shape — times are ISO 8601 UTC under `appointmentInfo.startTime`/`endTime`; calendar → service category via `GHL_CALENDAR_TO_SERVICE_CAT` map
+- **Outbound sync** (ServiceOps → GHL): job completed → `PUT /opportunities/{id}` set `status: won`; estimate flagged → `POST /opportunities/{id}/tasks`
+- **ALL stage/category name mappings must be confirmed with client** before implementation — names in docs are illustrative
 
 ## Key Coding Patterns (Repeat These)
 - `cn()` from `@/lib/utils` for all conditional classNames
 - `usePathname()` for active nav detection — always in `'use client'` components
 - Dashboard pages: `export const metadata: Metadata = { title: "Page Name" }` for tab titles
-- All stat card / empty state / page header patterns are established — follow existing pages as template
-- Sidebar bg color applied as `style={{ backgroundColor: "#0C1E2E" }}` (Tailwind JIT can't generate arbitrary hex in some cases)
-- **Breadcrumb pattern**: every dashboard page starts with `<Breadcrumb items={[{ label: "Page Name" }]} className="mb-2" />` above its `<h2>`. For nested pages (e.g. `/dashboard/work-orders/[id]`), pass two items: `[{ label: "Work Orders", href: "/dashboard/work-orders" }, { label: "WO-001" }]`
-- **Nav link audit**: all 8 admin nav hrefs verified correct; active state logic `pathname === href || pathname.startsWith(href + "/")` handles both exact and nested routes correctly — do not change this logic
-- **Status/priority badges**: inline `<span>` with Tailwind classes from the badge color maps above. No external badge component yet. Pattern: `rounded-full px-2.5 py-0.5 text-xs font-medium`
-- **Filter controls pattern** (Phase 2 established): `'use client'` wrapper component holds filter state; receives full data array as prop, returns filtered subset to render. Server page passes mock data down.
-- **shadcn/ui Table**: use `Table, TableHeader, TableBody, TableRow, TableHead, TableCell` from `@/components/ui/table`. File lives at `src/components/ui/table.tsx`.
-- **Shared mock data**: `src/lib/mock-data/work-orders.ts` — `MOCK_WORK_ORDERS: WorkOrderWithRelations[]` — 5 realistic WOs. Both list and detail import from here. Replace with API call when DB is wired.
-- **WorkOrderDetail pattern**: `'use client'` component receives `workOrder` prop from server page. Status state is local (`useState`). Status transitions read from `WORK_ORDER_STATUS_TRANSITIONS` constant. `key={status}` on the select forces reset after each transition.
-- **Detail page params**: Next.js 15 — `params` is `Promise<{ id: string }>`, must `await params`. Use `notFound()` from `next/navigation` for missing IDs.
-- **Estimate Needed button**: shown only when `WORK_ORDER_STATUS_TRANSITIONS[status].includes(ESTIMATE_NEEDED)`. Clicking it sets status → ESTIMATE_NEEDED and estimateHandoff → FLAGGED. Filtered out of the "Change status" dropdown to avoid duplication.
-- **EstimateHandoffStatus display**: `ESTIMATE_HANDOFF_CONFIG` in `WorkOrderDetail.tsx` maps each status to label + className + description. Handoff section only renders when `estimateHandoff !== NOT_NEEDED`.
-- **GHL links section**: renders inside Job Info card only when `ghl_contact_id` or `ghl_opportunity_id` are present on the work order.
-- **New Work Order modal pattern**: `NewWorkOrderButton` (client) wraps both the trigger button and modal so the page stays a server component. Modal is a slide-over (`fixed inset-y-0 right-0 max-w-lg translate-x-full → translate-x-0`). On success: modal shows CheckCircle + WO number for 1800ms then auto-closes; `NewWorkOrderButton` shows emerald banner for 6s.
-- **Zod schema location**: `src/lib/validation/work-order.ts` — `NewWorkOrderSchema` + `NewWorkOrderInput` + `NewWorkOrderFieldErrors` types. Shared by modal client and API route.
-- **Priority selector**: 4-button segment control (not a `<select>`). Active colors: Low=slate-600, Normal=brand-500, High=orange-500, Urgent=red-500. `PRIORITY_ACTIVE` map in `NewWorkOrderModal.tsx`.
-- **Service category config**: `serviceTypes` array in `src/config/service-types.ts`. Also defines `PRIORITY_OPTIONS` (with `urgencyHint`) and `MOCK_TECHNICIANS` (Carlos M., Sarah K.).
-- **Mock API sequence**: `POST /api/work-orders` starts at WO-0006 (mock counter). Validates with Zod, returns 201 `{ data: createdWorkOrder }`. Sets `tenant_id: "tenant-showtime"`, `status: NEW`, `estimate_handoff_status: NOT_NEEDED`.
-
-## Validation Schemas (`src/lib/validation/`)
-- **`work-order.ts`**:
-  - `NewWorkOrderSchema` — form fields only (title, service_category, priority, description, scheduled_date, assigned_technician_id). Used by modal + POST route.
-  - `NewWorkOrderInput` — inferred type
-  - `NewWorkOrderFieldErrors` — `Partial<Record<keyof NewWorkOrderInput, string>>` — used for form error state
-  - `PatchWorkOrderSchema` — all fields optional, adds `status` + `estimate_handoff_status` + time fields. Used by PATCH route.
-  - `PatchWorkOrderInput` — inferred type
-- **`property.ts`** — `CreatePropertySchema` + `CreatePropertyInput` (POST body), `PatchPropertySchema` + `PatchPropertyInput` (PATCH body). Shared `EquipmentItemSchema` base extended by `PoolPumpSchema`, `PoolFilterSchema`, `PoolHeaterSchema`, `SanitizerSystemSchema`, `AutomationSystemSchema`, composed into `PoolEquipmentSchema`. Helper `optStr(maxLen)` returns optional string with empty-string-to-undefined coercion. `optDate` validates YYYY-MM-DD with same coercion.
-
-## Mock Data Files (`src/lib/mock-data/`)
-- **`work-orders.ts`** — `MOCK_WORK_ORDERS: WorkOrderWithRelations[]` — 5 WOs (WO-0001 to WO-0005). Read-only seed. Used by list page and detail page lookup.
-- **`store.ts`** — mutable in-memory store for work orders API. Seeded from `MOCK_WORK_ORDERS` via `structuredClone`. Exports: `listWorkOrders`, `createWorkOrder`, `updateWorkOrder`, `deleteWorkOrder`, `getWorkOrderById`.
-- **`properties.ts`** — `MOCK_PROPERTIES: PropertyWithRelations[]` — 5 properties (prop-001 to prop-005) matching the 5 mock WOs. Rich `pool_equipment` data on all 5.
-- **`property-store.ts`** — mutable in-memory store for properties API. Seeded via `structuredClone(MOCK_PROPERTIES)`. Exports: `listProperties`, `getPropertyById`, `createProperty`, `updateProperty`. `PropertyUpdateResult` = `{ ok: true, data }` | `{ ok: false, notFound: true }`. All operations require matching `tenant_id` (default "tenant-showtime"). `updateProperty` preserves `id`, `tenant_id`, `created_at`, and computed relation fields (`active_work_order_count`, `last_service_date`, `last_service_technician_name`).
-
-## Work Order API Layer (`src/app/api/work-orders/`)
-- **In-memory store**: `src/lib/mock-data/store.ts` — seeded from `MOCK_WORK_ORDERS` via `structuredClone`. Persists within a warm process instance, resets on cold start. Replace with DB queries in Phase DB.
-- **`listWorkOrders({ tenant_id, status, category })`** — filters in store; defaults tenant to "tenant-showtime"
-- **`createWorkOrder(input, tenantId)`** — appends to store, auto-increments `wo_number`
-- **`updateWorkOrder(id, patch)`** → discriminated union: `{ ok: true, data }` | `{ ok: false, notFound }` | `{ ok: false, transitionError }`. Validates status transitions, auto-sets `completed_at`.
-- **`deleteWorkOrder(id)`** → boolean
-- **`PatchWorkOrderSchema`** in `src/lib/validation/work-order.ts` — all fields optional; validates enum values but NOT transitions (that's the route's job)
-- **Response shape**: `{ data: T }` for success; `{ error, issues? }` for failure; `{ error, allowed_transitions }` for bad transition
-- **Status codes**: 200 (GET/PATCH/DELETE), 201 (POST), 400 (bad param/JSON), 404 (not found), 422 (validation / bad transition)
-
-## Property Types (`src/types/property.ts`) — Phase 3
-- **`SanitizerType`** enum: chlorine, saltwater, uv, ozone, mineral, other
-- **`PumpSpeedType`** enum: single_speed, dual_speed, variable_speed
-- **`FilterType`** enum: cartridge, de, sand
-- **`HeaterType`** enum: gas, electric_heat_pump, solar, none
-- **`PoolShape`** enum: rectangle, freeform, lap, sport, other
-- **`EquipmentItem`** base interface: make?, model?, serial_number?, install_date? (YYYY-MM-DD), notes?
-- **`PoolPump`** extends EquipmentItem: type?: PumpSpeedType, hp?: number
-- **`PoolFilter`** extends EquipmentItem: type?: FilterType, size_sq_ft?: number
-- **`PoolHeater`** extends EquipmentItem: type?: HeaterType, btu_output?: number
-- **`SanitizerSystem`** extends EquipmentItem: type?: SanitizerType
-- **`AutomationSystem`** extends EquipmentItem (make/model/serial only)
-- **`PoolEquipment`**: pool_size_gallons?, pool_shape?, pump?, filter?, heater?, sanitizer?, automation?, additional_notes?, last_updated?
-- **`Property`** interface: id, tenant_id, ghl_contact_id? (optional — not all have GHL link), customer_name, address fields, gate_code?, access_notes?, service_notes?, pool_equipment?, is_active, created_at, updated_at
-- **`PropertyWithRelations`**: extends Property + active_work_order_count, last_service_date?, last_service_technician_name?
-- **`CreatePropertyInput`**: omits id/created_at/updated_at
-- **`UpdatePropertyInput`**: partial, omits id/tenant_id/created_at/updated_at
-- **Mock data**: `src/lib/mock-data/properties.ts` — `MOCK_PROPERTIES: PropertyWithRelations[]` — 5 realistic CA pool properties matching the 5 mock WOs (Rodriguez/prop-001 through Thompson/prop-005). Rich equipment data (make/model/serial/install_date) on all 5.
-- **Spec**: `specs/feature-property-profiles.md` — full spec written 2026-05-04
-
-## Property Detail Page Patterns (`PropertyDetail.tsx`)
-- **Inline edit pattern**: per-section toggle. `startEdit*()` re-initializes draft from current state; `save*()` updates local `prop` state + shows 5s info banner; `cancel*()` resets draft + closes form.
-- **Equipment edit**: single `eqDraft: PoolEquipment` state. Sub-updaters `updatePump/Filter/Heater/Sanitizer/Automation(key, value)` use spread to update nested objects. `startEditEquipment()` re-initializes from current `prop.pool_equipment`. Save sets `last_updated` to current ISO timestamp.
-- **Equipment display**: pool specs (gallons + shape) as a summary row; 5 sub-cards in 2-col grid (pump/filter/heater/sanitizer) + automation full-width; `EquipmentBlock` shows "Not on file" when sub-system is absent; pump notes shown as amber left-border callout.
-- **Gate code display**: amber badge with monospaced bold text + `tracking-widest` — visually prominent for technicians.
-- **WO history**: mini `<table>` (not shadcn Table) inside the card; columns: WO#, Title, Status badge, Scheduled date, Tech. Links to WO detail pages. relatedWorkOrders filtered on server by `property_id`.
-- **Server page pattern**: `generateMetadata` + default export both `await params`; filter `MOCK_WORK_ORDERS` by `property_id` and pass as prop. `notFound()` on missing ID.
-- **WO → Property link fixed**: `WorkOrderDetail.tsx` "View Property" link now uses `/dashboard/properties/${workOrder.property_id}` (was `/dashboard/properties`).
-- **`EF` helper**: tiny `<dt>/<dd>` pair inside `EquipmentBlock` — returns `null` if value is nullish/empty (avoids showing empty fields in read view).
-- **`EqSubFormHeader`**: small uppercase section label between equipment sub-form groups.
-
-## Properties List Page Patterns (`PropertiesTable.tsx`)
-- **Search**: real-time `useMemo` filter on `customer_name + address_line1 + city` (case-insensitive). Input has inline X to clear. Search box has focus ring matching brand-400.
-- **Active filter**: `<select>` with "All Properties" / "Active Only" / "Inactive Only" — same pattern as WO status filter.
-- **Count display**: "5 properties" / "1 of 5 properties" — updates when either filter is active.
-- **Clear button**: appears when any filter active; clears both search + dropdown at once.
-- **Avatar column**: single initial in brand-50/brand-700 circle, customer name as link to `/dashboard/properties/[id]`, "GHL linked" sub-label with ExternalLink icon if `ghl_contact_id` is set.
-- **Work Orders column**: cyan badge "N active" if count > 0; slate "None" badge if 0.
-- **Equipment column**: emerald "On file" badge with Wrench icon if `pool_equipment` present; "—" otherwise.
-- **Status column**: emerald "Active" / slate "Inactive" rounded-full badge.
-- **Empty state**: MapPin icon + "No properties found" + contextual hint when filters active.
+- **Detail page params**: Next.js 15 — `params` is `Promise<{ id: string }>`, must `await params`. Both `generateMetadata` and page function await it independently.
+- **Tenant resolution in API routes**: `request.nextUrl.searchParams.get("tenant_id") ?? "tenant-showtime"` — all [id] routes use a `resolveTenantId(request)` helper.
+- **Response shape convention**: `{ data: T }` success; `{ error, issues? }` validation failure; `{ error }` 404/400. Consistent across all API routes.
+- **globalThis pattern for shared in-memory state**: use `(globalThis as any).__storeName` to share mutable state across Next.js dev mode module instances. Required for stores that start empty and are populated server-side then read by API routes.
+- **Zod schema location**: `src/lib/validation/` — one file per domain. Schemas named `Create*Schema` + `Patch*Schema`. Types inferred with `z.infer<>`.
+- **Filter controls pattern** (Phase 2+): `'use client'` wrapper component holds filter state; receives full data array as prop from server page.
+- **shadcn/ui Table**: `Table, TableHeader, TableBody, TableRow, TableHead, TableCell` from `@/components/ui/table`.
+- **Status/priority badges**: inline `<span>` with Tailwind classes from color maps above. Pattern: `rounded-full px-2.5 py-0.5 text-xs font-medium`.
+- **Breadcrumb pattern**: `<Breadcrumb items={[...]} className="mb-2" />` at top of every dashboard page.
 
 ## Work Order Types (`src/types/work-order.ts`)
 - `WorkOrderStatus`: new, assigned, in_progress, completed, needs_follow_up, estimate_needed, cancelled
 - `Priority`: low, normal, high, urgent
 - `ServiceCategory`: 10 values — weekly_pool_maintenance, pool_repair, pool_inspection_diagnostic, filter_cleaning, heater_service, equipment_installation, pool_remodel, new_construction, emergency_service, other
 - `EstimateHandoffStatus`: not_needed, flagged, sent_to_ghl, estimate_sent, approved, declined
-- `WorkOrder` interface: all DB fields; optional fields use `?`
-- `CreateWorkOrderInput`: status + estimate_handoff_status are optional (default NEW / NOT_NEEDED)
-- `UpdateWorkOrderInput`: partial, tenant_id is immutable
-- `WorkOrderWithRelations`: extends WorkOrder with `property_address`, `property_customer_name`, `assigned_technician_name?`
-- `WORK_ORDER_STATUS_TRANSITIONS`: allowed-transitions map — use this for validation, not hardcoded logic
+- `WorkOrder.ghl_sync_failed?: boolean` — set true when outbound GHL sync failed after all retries; cleared on next successful sync
+- `WorkOrderWithRelations`: extends WorkOrder + `property_address`, `property_customer_name`, `assigned_technician_name?`
+- `WORK_ORDER_STATUS_TRANSITIONS`: use this for validation everywhere
 
-## Other Key Enums
-- `UserRole`: platform_owner, tenant_admin, office_staff, technician, read_only_owner
+## Visit Types (`src/types/visit.ts`)
 - `VisitStatus`: scheduled, in_progress, completed, skipped, rescheduled, cancelled
+- `ChecklistItem`: id, label, completed, notes?
+- `Visit`: id, tenant_id, work_order_id, property_id, technician_id?, status, scheduled_date, checklist, technician_notes?, photo_urls, completed_at?, estimate_flagged, created_at, updated_at
+- `CreateVisitInput`: omits id/created_at/updated_at
+- `UpdateVisitInput`: partial of CreateVisitInput
 
 ## GHL Boundaries (Do Not Cross)
-GHL handles: CRM, contacts, conversations, forms, lead capture, pipelines, calendars, SMS/email, marketing automations, missed-call text-back.
+GHL handles: CRM, contacts, conversations, forms, lead capture, pipelines, calendars, SMS/email, marketing automations.
 ServiceOps handles: work orders, visits, property profiles, technician workflow, checklists, photos, notes, completion reports.
 
 ## Confirmed Client Context
@@ -250,7 +332,7 @@ ServiceOps handles: work orders, visits, property profiles, technician workflow,
 ## Dependencies Installed
 - `next` 15, `react` 18, `typescript` 5, `tailwindcss` 3.4
 - `lucide-react`, `clsx`, `tailwind-merge`, `class-variance-authority`
-- `zod` (v4) — installed for form + API validation
+- `zod` (v4)
 
 ## Open Questions
 - Which GHL plan does Showtime use? (affects API access tier)
@@ -258,6 +340,13 @@ ServiceOps handles: work orders, visits, property profiles, technician workflow,
 - Photo storage: Supabase Storage, AWS S3, or Cloudinary?
 - Recurring visits: GHL calendar sync or internal schedule?
 - Estimate handoff: create new GHL opportunity or update existing?
+- GHL pipeline stage names for Showtime Pools — must confirm before going live (all stage names in mapping docs are illustrative)
+- GHL custom field IDs for gate_code, access_notes, service_notes, scheduled_date, service_category, priority — must retrieve from client's GHL account
+- Phase 5 remaining: ContactCreate/ContactUpdate → Property upsert handler not yet implemented (only OpportunityStatusChange is wired)
+- Phase 5 remaining: AppointmentBooked handler not yet implemented
+- Phase 6 remaining: Retry queue is in-memory — needs persistent backing (DB table or Redis) before production
+- Phase 6 remaining: `ghl_sync_failed` flag not yet surfaced in the admin dashboard UI
+- Phase 6 remaining: `waitUntil()` wrapper for serverless deployments not yet added to the PATCH route
 
 ## Detailed Memory Files Location
 - memory/product-decisions.md — architecture and product decisions

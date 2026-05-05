@@ -43,6 +43,15 @@ export function getPropertyById(
   return store.find((p) => p.id === id && p.tenant_id === tenantId);
 }
 
+export function findPropertyByGhlContactId(
+  ghlContactId: string,
+  tenantId = "tenant-showtime"
+): PropertyWithRelations | undefined {
+  return store.find(
+    (p) => p.ghl_contact_id === ghlContactId && p.tenant_id === tenantId
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Create
 // ---------------------------------------------------------------------------

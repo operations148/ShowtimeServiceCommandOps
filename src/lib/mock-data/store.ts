@@ -4,7 +4,7 @@ import {
   Priority,
   WORK_ORDER_STATUS_TRANSITIONS,
 } from "@/types/work-order";
-import type { WorkOrderWithRelations, UpdateWorkOrderInput } from "@/types/work-order";
+import type { WorkOrderWithRelations, UpdateWorkOrderInput, CreateWorkOrderInput } from "@/types/work-order";
 import type { NewWorkOrderInput } from "@/lib/validation/work-order";
 import { MOCK_WORK_ORDERS } from "./work-orders";
 
@@ -49,6 +49,15 @@ export function getWorkOrderById(id: string): WorkOrderWithRelations | undefined
   return store.find((wo) => wo.id === id);
 }
 
+export function findByGhlOpportunityId(
+  ghlOpportunityId: string,
+  tenantId = "tenant-showtime"
+): WorkOrderWithRelations | undefined {
+  return store.find(
+    (wo) => wo.ghl_opportunity_id === ghlOpportunityId && wo.tenant_id === tenantId
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Create
 // ---------------------------------------------------------------------------
@@ -76,6 +85,43 @@ export function createWorkOrder(
     // Relation fields — populated from property module in Phase 3
     property_address: "To be linked in Phase 3",
     property_customer_name: "Unlinked",
+  };
+  store.push(newWo);
+  return newWo;
+}
+
+// Full create — used by GHL webhook processing where property_id and GHL
+// foreign keys are known. Accepts denormalized relation fields for list views.
+export function createWorkOrderFull(
+  input: CreateWorkOrderInput,
+  propertyAddress: string,
+  propertyCustomerName: string,
+  assignedTechnicianName?: string,
+): WorkOrderWithRelations {
+  const now = new Date().toISOString();
+  const newWo: WorkOrderWithRelations = {
+    id:                     `wo-${Date.now()}`,
+    wo_number:              nextWoNumber(),
+    tenant_id:              input.tenant_id,
+    property_id:            input.property_id,
+    ghl_contact_id:         input.ghl_contact_id,
+    ghl_opportunity_id:     input.ghl_opportunity_id,
+    title:                  input.title,
+    description:            input.description,
+    status:                 input.status ?? WorkOrderStatus.NEW,
+    priority:               input.priority,
+    service_category:       input.service_category,
+    assigned_technician_id: input.assigned_technician_id,
+    scheduled_date:         input.scheduled_date,
+    scheduled_time_start:   input.scheduled_time_start,
+    scheduled_time_end:     input.scheduled_time_end,
+    completed_at:           input.completed_at,
+    estimate_handoff_status: input.estimate_handoff_status ?? EstimateHandoffStatus.NOT_NEEDED,
+    created_at:             now,
+    updated_at:             now,
+    property_address:       propertyAddress,
+    property_customer_name: propertyCustomerName,
+    assigned_technician_name: assignedTechnicianName,
   };
   store.push(newWo);
   return newWo;

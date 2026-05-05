@@ -11,17 +11,17 @@ import {
   CheckCircle2,
   AlertTriangle,
   FileText,
-  Wrench,
+  Loader2,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-  WorkOrderStatus,
   Priority,
   ServiceCategory,
   type WorkOrderWithRelations,
 } from "@/types/work-order";
+import { VisitStatus, type ChecklistItem } from "@/types/visit";
 import type { PropertyWithRelations } from "@/types/property";
-import type { ChecklistItem } from "@/types/visit";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,9 +29,24 @@ interface Props {
   wo: WorkOrderWithRelations;
   property: PropertyWithRelations | undefined;
   initialChecklist: ChecklistItem[];
+  visitId: string;
 }
 
-type ActionResult = null | "complete" | "estimate";
+// The page moves through a linear state machine.
+type Phase =
+  | "idle"             // Normal — checklist interactive, actions available
+  | "warn_incomplete"  // Complete tapped but items unchecked — show warning
+  | "estimate_prompt"  // Estimate tapped — show notes sheet
+  | "submitting"       // API call in flight
+  | "done_complete"    // Visit saved as COMPLETED
+  | "done_estimate";   // Visit saved with estimate_flagged = true
+
+interface DoneSummary {
+  checkedCount: number;
+  totalCount: number;
+  hasNotes: boolean;
+  completedAt: string; // ISO
+}
 
 // ─── Label maps ───────────────────────────────────────────────────────────────
 
@@ -62,6 +77,16 @@ const PRIORITY_LABEL: Record<Priority, string> = {
   [Priority.URGENT]: "Urgent",
 };
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatCompletedAt(iso: string): string {
+  return new Date(iso).toLocaleTimeString("en-US", {
+    hour:   "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -80,18 +105,157 @@ function Card({ children, className }: { children: React.ReactNode; className?: 
   );
 }
 
+// ─── Completion screen ────────────────────────────────────────────────────────
+
+function CompletionScreen({ wo, summary }: { wo: WorkOrderWithRelations; summary: DoneSummary }) {
+  const allChecked = summary.checkedCount === summary.totalCount;
+
+  return (
+    <div className="flex min-h-screen flex-col bg-slate-50">
+      {/* Top bar matches TechShell but themed green */}
+      <div className="flex flex-col items-center px-6 pb-10 pt-16 text-center">
+        {/* Big check circle */}
+        <div className="flex h-24 w-24 items-center justify-center rounded-full bg-emerald-100 shadow-[0_0_0_12px_rgba(16,185,129,0.08)]">
+          <CheckCircle2 className="h-12 w-12 text-emerald-500" strokeWidth={1.5} />
+        </div>
+
+        <h1 className="mt-6 font-display text-2xl font-bold text-slate-900">
+          Job Complete
+        </h1>
+        <p className="mt-1 text-sm text-slate-500">
+          {wo.wo_number} &middot; {wo.property_customer_name}
+        </p>
+        <p className="mt-0.5 text-xs text-slate-400">
+          Completed at {formatCompletedAt(summary.completedAt)}
+        </p>
+      </div>
+
+      {/* Summary cards */}
+      <div className="space-y-2 px-6">
+        <div className={cn(
+          "flex items-center gap-3 rounded-2xl px-4 py-4",
+          allChecked ? "bg-emerald-50 border border-emerald-200" : "bg-amber-50 border border-amber-200"
+        )}>
+          {allChecked
+            ? <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
+            : <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600" />
+          }
+          <div>
+            <p className={cn("text-sm font-semibold", allChecked ? "text-emerald-800" : "text-amber-800")}>
+              {summary.checkedCount}/{summary.totalCount} checklist items completed
+            </p>
+            {!allChecked && (
+              <p className="text-xs text-amber-600">
+                {summary.totalCount - summary.checkedCount} items were left unchecked
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className={cn(
+          "flex items-center gap-3 rounded-2xl px-4 py-4",
+          summary.hasNotes ? "bg-emerald-50 border border-emerald-200" : "bg-slate-100 border border-slate-200"
+        )}>
+          <FileText className={cn("h-5 w-5 shrink-0", summary.hasNotes ? "text-emerald-600" : "text-slate-400")} />
+          <p className={cn("text-sm font-semibold", summary.hasNotes ? "text-emerald-800" : "text-slate-500")}>
+            {summary.hasNotes ? "Technician notes saved" : "No notes added"}
+          </p>
+        </div>
+      </div>
+
+      {/* CTA */}
+      <div className="px-6 pt-8">
+        <Link
+          href="/tech/today"
+          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 py-4 text-sm font-semibold text-white active:opacity-80"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Today&apos;s Jobs
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+// ─── Estimate flagged screen ───────────────────────────────────────────────────
+
+function EstimateScreen({ wo, summary }: { wo: WorkOrderWithRelations; summary: DoneSummary }) {
+  return (
+    <div className="flex min-h-screen flex-col bg-slate-50">
+      <div className="flex flex-col items-center px-6 pb-10 pt-16 text-center">
+        <div className="flex h-24 w-24 items-center justify-center rounded-full bg-amber-100 shadow-[0_0_0_12px_rgba(245,158,11,0.08)]">
+          <AlertTriangle className="h-12 w-12 text-amber-500" strokeWidth={1.5} />
+        </div>
+
+        <h1 className="mt-6 font-display text-2xl font-bold text-slate-900">
+          Estimate Flagged
+        </h1>
+        <p className="mt-1 text-sm text-slate-500">
+          {wo.wo_number} &middot; {wo.property_customer_name}
+        </p>
+        <p className="mt-0.5 text-xs text-slate-400">
+          Flagged at {formatCompletedAt(summary.completedAt)}
+        </p>
+      </div>
+
+      <div className="space-y-2 px-6">
+        <div className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+          <CheckCircle2 className="h-5 w-5 shrink-0 text-amber-600" />
+          <div>
+            <p className="text-sm font-semibold text-amber-800">Office has been notified</p>
+            <p className="text-xs text-amber-600">
+              An estimate will be prepared and sent to the customer.
+            </p>
+          </div>
+        </div>
+
+        <div className={cn(
+          "flex items-center gap-3 rounded-2xl px-4 py-4",
+          summary.hasNotes ? "bg-emerald-50 border border-emerald-200" : "bg-slate-100 border border-slate-200"
+        )}>
+          <FileText className={cn("h-5 w-5 shrink-0", summary.hasNotes ? "text-emerald-600" : "text-slate-400")} />
+          <p className={cn("text-sm font-semibold", summary.hasNotes ? "text-emerald-800" : "text-slate-500")}>
+            {summary.hasNotes ? "Estimate notes saved" : "No estimate notes added"}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-100 px-4 py-4">
+          <CheckCircle2 className="h-5 w-5 shrink-0 text-slate-400" />
+          <p className="text-sm font-semibold text-slate-500">
+            {summary.checkedCount}/{summary.totalCount} checklist items completed
+          </p>
+        </div>
+      </div>
+
+      <div className="px-6 pt-8">
+        <Link
+          href="/tech/today"
+          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 py-4 text-sm font-semibold text-white active:opacity-80"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Today&apos;s Jobs
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export function JobDetail({ wo, property, initialChecklist }: Props) {
-  const [checklist, setChecklist] = useState<ChecklistItem[]>(initialChecklist);
-  const [notes, setNotes]         = useState("");
-  const [result, setResult]       = useState<ActionResult>(null);
+export function JobDetail({ wo, property, initialChecklist, visitId }: Props) {
+  const [checklist, setChecklist]       = useState<ChecklistItem[]>(initialChecklist);
+  const [notes, setNotes]               = useState("");
+  const [estimateNotes, setEstimateNotes] = useState("");
+  const [phase, setPhase]               = useState<Phase>("idle");
+  const [apiError, setApiError]         = useState<string | null>(null);
+  const [doneSummary, setDoneSummary]   = useState<DoneSummary | null>(null);
 
   const checkedCount  = checklist.filter((i) => i.completed).length;
   const totalCount    = checklist.length;
+  const uncheckedCount = totalCount - checkedCount;
   const progressPct   = totalCount > 0 ? Math.round((checkedCount / totalCount) * 100) : 0;
-  const allChecked    = checkedCount === totalCount;
-  const isLocked      = result !== null;
+  const allChecked    = uncheckedCount === 0;
+  const isLocked      = phase === "submitting" || phase === "done_complete" || phase === "done_estimate";
 
   const address = [
     property?.address_line1,
@@ -103,6 +267,8 @@ export function JobDetail({ wo, property, initialChecklist }: Props) {
     .filter(Boolean)
     .join(", ") || wo.property_address;
 
+  // ── Checklist ───────────────────────────────────────────────────────────────
+
   function toggleItem(id: string) {
     if (isLocked) return;
     setChecklist((prev) =>
@@ -110,37 +276,85 @@ export function JobDetail({ wo, property, initialChecklist }: Props) {
     );
   }
 
-  function handleAction(action: "complete" | "estimate") {
-    setResult(action);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  // ── API call ────────────────────────────────────────────────────────────────
+
+  async function patchVisit(payload: object): Promise<boolean> {
+    setApiError(null);
+    setPhase("submitting");
+    try {
+      const res = await fetch(`/api/visits/${visitId}`, {
+        method:  "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error((json as { error?: string }).error ?? `HTTP ${res.status}`);
+      }
+      return true;
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : "Failed to save. Try again.");
+      setPhase("idle");
+      return false;
+    }
   }
 
-  // ── Result banner ──────────────────────────────────────────────────────────
+  // ── Actions ─────────────────────────────────────────────────────────────────
 
-  const resultBanner =
-    result === "complete" ? (
-      <div className="mx-4 mt-4 flex items-start gap-3 rounded-2xl bg-emerald-50 border border-emerald-200 px-4 py-3.5">
-        <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-        <div>
-          <p className="text-sm font-semibold text-emerald-800">Job marked complete</p>
-          <p className="text-xs text-emerald-600 mt-0.5">
-            {checkedCount}/{totalCount} checklist items · Notes {notes ? "saved" : "not added"}
-          </p>
-        </div>
-      </div>
-    ) : result === "estimate" ? (
-      <div className="mx-4 mt-4 flex items-start gap-3 rounded-2xl bg-amber-50 border border-amber-200 px-4 py-3.5">
-        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
-        <div>
-          <p className="text-sm font-semibold text-amber-800">Estimate flagged for office</p>
-          <p className="text-xs text-amber-600 mt-0.5">
-            The office will follow up with an estimate for this job.
-          </p>
-        </div>
-      </div>
-    ) : null;
+  function handleMarkCompleteTap() {
+    if (!allChecked) {
+      setPhase("warn_incomplete");
+    } else {
+      submitComplete();
+    }
+  }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  async function submitComplete() {
+    const now = new Date().toISOString();
+    const ok = await patchVisit({
+      status:           VisitStatus.COMPLETED,
+      checklist,
+      technician_notes: notes || undefined,
+      estimate_flagged: false,
+      completed_at:     now,
+    });
+    if (ok) {
+      setDoneSummary({ checkedCount, totalCount, hasNotes: notes.trim().length > 0, completedAt: now });
+      setPhase("done_complete");
+    }
+  }
+
+  async function submitEstimate() {
+    const now = new Date().toISOString();
+    const combinedNotes = [notes, estimateNotes].filter(Boolean).join("\n\n---\n\nEstimate notes:\n");
+    const ok = await patchVisit({
+      status:           VisitStatus.IN_PROGRESS,
+      checklist,
+      technician_notes: combinedNotes || undefined,
+      estimate_flagged: true,
+      completed_at:     now,
+    });
+    if (ok) {
+      setDoneSummary({
+        checkedCount,
+        totalCount,
+        hasNotes: combinedNotes.trim().length > 0,
+        completedAt: now,
+      });
+      setPhase("done_estimate");
+    }
+  }
+
+  // ── Render done screens ─────────────────────────────────────────────────────
+
+  if (phase === "done_complete" && doneSummary) {
+    return <CompletionScreen wo={wo} summary={doneSummary} />;
+  }
+  if (phase === "done_estimate" && doneSummary) {
+    return <EstimateScreen wo={wo} summary={doneSummary} />;
+  }
+
+  // ── Render main view ────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col">
@@ -184,8 +398,19 @@ export function JobDetail({ wo, property, initialChecklist }: Props) {
         </div>
       </div>
 
-      {/* ── Result banner ───────────────────────────────────────────────────── */}
-      {resultBanner}
+      {/* ── API error banner ─────────────────────────────────────────────────── */}
+      {apiError && (
+        <div className="mx-4 mt-4 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3.5">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-red-800">Save failed</p>
+            <p className="text-xs text-red-600">{apiError}</p>
+          </div>
+          <button onClick={() => setApiError(null)} className="shrink-0 text-red-400 active:text-red-600">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* ── Scrollable body ─────────────────────────────────────────────────── */}
       <div className="space-y-5 px-4 pb-36 pt-5">
@@ -215,7 +440,10 @@ export function JobDetail({ wo, property, initialChecklist }: Props) {
         <div>
           <div className="mb-3 flex items-center justify-between">
             <SectionLabel>Checklist</SectionLabel>
-            <span className="text-xs font-semibold text-slate-500">
+            <span className={cn(
+              "text-xs font-semibold",
+              allChecked ? "text-emerald-600" : "text-slate-500"
+            )}>
               {checkedCount}/{totalCount}
             </span>
           </div>
@@ -242,10 +470,9 @@ export function JobDetail({ wo, property, initialChecklist }: Props) {
                   "flex w-full items-center gap-4 px-4 py-4 text-left",
                   "transition-colors active:bg-slate-50",
                   i > 0 && "border-t border-slate-100",
-                  isLocked && "cursor-default opacity-80"
+                  isLocked && "cursor-default"
                 )}
               >
-                {/* Checkbox circle */}
                 <span
                   className={cn(
                     "flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
@@ -254,9 +481,10 @@ export function JobDetail({ wo, property, initialChecklist }: Props) {
                       : "border-slate-300 bg-white"
                   )}
                 >
-                  {item.completed && <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />}
+                  {item.completed && (
+                    <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />
+                  )}
                 </span>
-
                 <span
                   className={cn(
                     "flex-1 text-sm leading-snug",
@@ -270,7 +498,7 @@ export function JobDetail({ wo, property, initialChecklist }: Props) {
           </Card>
         </div>
 
-        {/* Notes */}
+        {/* Technician Notes */}
         <div>
           <SectionLabel>Technician Notes</SectionLabel>
           <Card className="p-4">
@@ -288,8 +516,7 @@ export function JobDetail({ wo, property, initialChecklist }: Props) {
                 "mt-3 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-3",
                 "text-sm leading-relaxed text-slate-800 placeholder:text-slate-400",
                 "focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100",
-                "transition-colors",
-                isLocked && "cursor-default opacity-60"
+                "transition-colors disabled:cursor-default disabled:opacity-60"
               )}
             />
           </Card>
@@ -306,7 +533,7 @@ export function JobDetail({ wo, property, initialChecklist }: Props) {
                 "flex w-full flex-col items-center gap-2.5 rounded-xl border-2 border-dashed border-slate-200 py-7",
                 "text-slate-400 transition-colors active:bg-slate-50",
                 "hover:border-brand-300 hover:text-brand-500",
-                isLocked && "cursor-default opacity-60"
+                "disabled:cursor-default disabled:opacity-60"
               )}
             >
               <Camera className="h-7 w-7" />
@@ -320,43 +547,139 @@ export function JobDetail({ wo, property, initialChecklist }: Props) {
 
       </div>
 
-      {/* ── Sticky action bar ───────────────────────────────────────────────── */}
+      {/* ── Fixed action bar ────────────────────────────────────────────────── */}
       <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-slate-200 bg-white px-4 pb-6 pt-4 shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
-        {result ? (
-          <Link
-            href="/tech/today"
-            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 py-4 text-sm font-semibold text-white active:opacity-80"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Today&apos;s Jobs
-          </Link>
-        ) : (
+
+        {/* Default: two action buttons */}
+        {phase === "idle" && (
           <div className="flex gap-3">
             <button
               type="button"
-              onClick={() => handleAction("complete")}
-              className={cn(
-                "flex flex-1 items-center justify-center gap-2 rounded-2xl py-4 text-sm font-semibold text-white",
-                "bg-emerald-500 transition-opacity active:opacity-80"
-              )}
+              onClick={handleMarkCompleteTap}
+              className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-4 text-sm font-semibold text-white transition-opacity active:opacity-80"
             >
               <CheckCircle2 className="h-4 w-4" />
               Mark Complete
             </button>
             <button
               type="button"
-              onClick={() => handleAction("estimate")}
-              className={cn(
-                "flex flex-1 items-center justify-center gap-2 rounded-2xl py-4 text-sm font-semibold",
-                "border-2 border-amber-300 bg-amber-50 text-amber-700 transition-opacity active:opacity-80"
-              )}
+              onClick={() => setPhase("estimate_prompt")}
+              className="flex flex-1 items-center justify-center gap-2 rounded-2xl border-2 border-amber-300 bg-amber-50 py-4 text-sm font-semibold text-amber-700 transition-opacity active:opacity-80"
             >
               <AlertTriangle className="h-4 w-4" />
               Estimate Needed
             </button>
           </div>
         )}
+
+        {/* Warning: incomplete checklist items */}
+        {phase === "warn_incomplete" && (
+          <div>
+            <div className="mb-3 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+              <div>
+                <p className="text-sm font-semibold text-amber-800">
+                  {uncheckedCount} item{uncheckedCount !== 1 ? "s" : ""} not checked
+                </p>
+                <p className="text-xs text-amber-600">
+                  Are you sure this job is complete?
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setPhase("idle")}
+                className="flex flex-1 items-center justify-center rounded-2xl border-2 border-slate-200 bg-white py-4 text-sm font-semibold text-slate-700 active:bg-slate-50"
+              >
+                Go Back
+              </button>
+              <button
+                type="button"
+                onClick={submitComplete}
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-4 text-sm font-semibold text-white active:opacity-80"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Complete Anyway
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Submitting spinner */}
+        {phase === "submitting" && (
+          <div className="flex items-center justify-center gap-3 py-4">
+            <Loader2 className="h-5 w-5 animate-spin text-brand-500" />
+            <span className="text-sm font-semibold text-slate-600">Saving…</span>
+          </div>
+        )}
+
       </div>
+
+      {/* ── Estimate prompt overlay (bottom sheet) ──────────────────────────── */}
+      {phase === "estimate_prompt" && (
+        <div className="fixed inset-0 z-30 flex items-end">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setPhase("idle")}
+          />
+
+          {/* Sheet */}
+          <div className="relative w-full rounded-t-3xl bg-white px-4 pb-8 pt-5 shadow-xl">
+            {/* Handle */}
+            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-slate-200" />
+
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="font-display text-lg font-bold text-slate-900">Flag for Estimate</h2>
+                <p className="mt-0.5 text-sm text-slate-500">
+                  Add notes for the office about what work is needed.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPhase("idle")}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 active:bg-slate-200"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <textarea
+              value={estimateNotes}
+              onChange={(e) => setEstimateNotes(e.target.value)}
+              autoFocus
+              placeholder="Describe the issue, parts needed, estimated scope…"
+              rows={4}
+              className={cn(
+                "mt-4 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-3",
+                "text-sm leading-relaxed text-slate-800 placeholder:text-slate-400",
+                "focus:border-amber-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-100",
+                "transition-colors"
+              )}
+            />
+
+            <div className="mt-4 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setPhase("idle")}
+                className="flex flex-1 items-center justify-center rounded-2xl border-2 border-slate-200 bg-white py-4 text-sm font-semibold text-slate-700 active:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitEstimate}
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-amber-500 py-4 text-sm font-semibold text-white active:opacity-80"
+              >
+                <AlertTriangle className="h-4 w-4" />
+                Flag Estimate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

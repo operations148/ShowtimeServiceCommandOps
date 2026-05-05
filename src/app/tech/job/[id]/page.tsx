@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { MOCK_WORK_ORDERS } from "@/lib/mock-data/work-orders";
 import { MOCK_PROPERTIES } from "@/lib/mock-data/properties";
 import { checklistTemplates } from "@/config/checklist-templates";
+import { getOrCreateVisit } from "@/lib/mock-data/visit-store";
 import type { ChecklistItem } from "@/types/visit";
 import { JobDetail } from "@/components/tech/JobDetail";
 
@@ -48,11 +49,20 @@ export default async function TechJobDetailPage({ params }: Props) {
     completed: false,
   }));
 
+  // Idempotent — returns the same visit if already created for this WO.
+  const visit = getOrCreateVisit(
+    wo.id,
+    wo.property_id,
+    wo.assigned_technician_id,
+    initialChecklist
+  );
+
   return (
     <JobDetail
       wo={wo}
       property={property}
-      initialChecklist={initialChecklist}
+      initialChecklist={visit.checklist}
+      visitId={visit.id}
     />
   );
 }

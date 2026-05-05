@@ -58,6 +58,9 @@ export interface WorkOrder {
   scheduled_time_end?: string;   // "HH:MM"
   completed_at?: string;         // ISO datetime string
   estimate_handoff_status: EstimateHandoffStatus;
+  /** Set true when an outbound GHL sync attempt failed after all retries.
+   *  Cleared automatically if a subsequent sync succeeds. */
+  ghl_sync_failed?: boolean;
   created_at: string;
   updated_at: string;
 }
