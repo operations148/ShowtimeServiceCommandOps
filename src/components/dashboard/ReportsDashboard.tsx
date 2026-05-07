@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Printer, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Printer, RefreshCw, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { WorkOrderStatus, ServiceCategory } from "@/types/work-order";
 import type { RangeReport, StatusRow, CategoryRow, TechRow } from "@/app/api/reports/range/route";

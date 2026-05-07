@@ -1,7 +1,8 @@
+import React from "react";
 import { cn } from "@/lib/utils";
 
-function Bone({ className }: { className?: string }) {
-  return <div className={cn("animate-pulse rounded-md bg-slate-100", className)} />;
+function Bone({ className, style }: { className?: string; style?: React.CSSProperties }) {
+  return <div className={cn("animate-pulse rounded-md bg-slate-100", className)} style={style} />;
 }
 
 // ── Table row skeleton ────────────────────────────────────────────────────────

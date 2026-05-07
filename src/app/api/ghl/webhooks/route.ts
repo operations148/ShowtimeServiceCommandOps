@@ -2,6 +2,8 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import type { GHLWebhookPayload } from "@/types/ghl";
 import { createWorkOrderFromGHL } from "@/lib/ghl/create-work-order-from-ghl";
+import { upsertPropertyFromGHL } from "@/lib/ghl/upsert-property-from-ghl";
+import { createWorkOrderFromAppointment } from "@/lib/ghl/create-work-order-from-appointment";
 
 // ---------------------------------------------------------------------------
 // Signature verification
@@ -117,7 +119,52 @@ async function dispatch(payload: GHLWebhookPayload): Promise<void> {
     }
 
     case "ContactCreate":
-    case "ContactUpdate":
+    case "ContactUpdate": {
+      const result = await upsertPropertyFromGHL(payload);
+      switch (result.outcome) {
+        case "created":
+          console.log(
+            `[ghl/webhooks] ${payload.type} → created Property ${result.property.id} (${result.property.customer_name})`
+          );
+          break;
+        case "updated":
+          console.log(
+            `[ghl/webhooks] ${payload.type} → updated Property ${result.property.id} (${result.property.customer_name})`
+          );
+          break;
+        case "skipped":
+          console.log(`[ghl/webhooks] ${payload.type} → skipped: ${result.reason}`);
+          break;
+        case "error":
+          console.error(`[ghl/webhooks] ${payload.type} → error: ${result.reason}`);
+          break;
+      }
+      break;
+    }
+
+    case "AppointmentBooked": {
+      const result = await createWorkOrderFromAppointment(payload);
+      switch (result.outcome) {
+        case "created":
+          console.log(
+            `[ghl/webhooks] AppointmentBooked → created WorkOrder ${result.workOrder.wo_number}`
+          );
+          break;
+        case "already_exists":
+          console.log(
+            `[ghl/webhooks] AppointmentBooked → idempotent, existing WorkOrder ${result.workOrder.wo_number}`
+          );
+          break;
+        case "skipped":
+          console.log(`[ghl/webhooks] AppointmentBooked → skipped: ${result.reason}`);
+          break;
+        case "error":
+          console.error(`[ghl/webhooks] AppointmentBooked → error: ${result.reason}`);
+          break;
+      }
+      break;
+    }
+
     case "ContactDelete":
     case "ContactTagApplied":
     case "OpportunityCreate":
@@ -125,7 +172,6 @@ async function dispatch(payload: GHLWebhookPayload): Promise<void> {
     case "OpportunityAssignedToUpdate":
     case "OpportunityMonetaryValueUpdate":
     case "OpportunityDelete":
-    case "AppointmentBooked":
       break;
 
     default: {
