@@ -99,7 +99,7 @@ function mapRow(row: WoJoinedRow): WorkOrderWithRelations {
 
 // Joined select used by all read queries
 const WO_SELECT =
-  "*, properties!work_orders_property_id_fkey(customer_name, address_line1, city, state, zip), users!work_orders_assigned_technician_id_fkey(name)";
+  "*, properties(customer_name, address_line1, city, state, zip), users(name)";
 
 // ---------------------------------------------------------------------------
 // Re-exported result types (same surface as mock store so routes don't change)
