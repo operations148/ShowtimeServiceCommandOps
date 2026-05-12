@@ -3,18 +3,32 @@
 import { useRef, useState } from "react";
 import { Plus, CheckCircle2, X } from "lucide-react";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
-import { TechniciansList, type TechniciansListHandle } from "./TechniciansList";
+import { TechniciansList, type TechniciansListHandle, type Technician } from "./TechniciansList";
 import { NewTechnicianModal } from "./NewTechnicianModal";
+import { EditTechnicianPanel } from "./EditTechnicianPanel";
+
+type Toast = { type: "success" | "updated"; message: string };
 
 export function TechniciansPageClient() {
   const [isOpen, setIsOpen] = useState(false);
-  const [successBanner, setSuccessBanner] = useState<string | null>(null);
+  const [selectedTech, setSelectedTech] = useState<Technician | null>(null);
+  const [toast, setToast] = useState<Toast | null>(null);
   const listRef = useRef<TechniciansListHandle>(null);
 
-  function handleSuccess(name: string) {
-    setSuccessBanner(name);
+  function showToast(t: Toast, ms = 6000) {
+    setToast(t);
+    setTimeout(() => setToast(null), ms);
+  }
+
+  function handleAddSuccess(name: string) {
     listRef.current?.refresh();
-    setTimeout(() => setSuccessBanner(null), 6000);
+    showToast({ type: "success", message: `${name} added successfully` });
+  }
+
+  function handleUpdated(updated: Technician) {
+    listRef.current?.updateTechnician(updated);
+    setSelectedTech(null);
+    showToast({ type: "updated", message: `${updated.name}'s details have been updated` });
   }
 
   return (
@@ -29,15 +43,13 @@ export function TechniciansPageClient() {
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-2">
-          {successBanner && (
+          {toast && (
             <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">
               <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-              <span>
-                <span className="font-semibold">{successBanner}</span> added successfully
-              </span>
+              <span>{toast.message}</span>
               <button
                 type="button"
-                onClick={() => setSuccessBanner(null)}
+                onClick={() => setToast(null)}
                 className="ml-1 rounded p-0.5 hover:bg-emerald-100"
                 aria-label="Dismiss"
               >
@@ -56,13 +68,21 @@ export function TechniciansPageClient() {
         </div>
       </div>
 
-      <TechniciansList ref={listRef} />
+      <TechniciansList ref={listRef} onSelect={setSelectedTech} />
 
       <NewTechnicianModal
         open={isOpen}
         onClose={() => setIsOpen(false)}
-        onSuccess={handleSuccess}
+        onSuccess={handleAddSuccess}
       />
+
+      {selectedTech && (
+        <EditTechnicianPanel
+          tech={selectedTech}
+          onClose={() => setSelectedTech(null)}
+          onUpdated={handleUpdated}
+        />
+      )}
     </div>
   );
 }

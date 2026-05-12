@@ -25,7 +25,9 @@ import {
   Link2,
   Link2Off,
   FileDown,
+  ArrowRightLeft,
 } from "lucide-react";
+import type { StatusHistoryEntry } from "@/app/api/work-orders/[id]/history/route";
 import {
   WorkOrderStatus,
   Priority,
@@ -297,10 +299,21 @@ export function WorkOrderDetail({
   const [estimateHandoff, setEstimateHandoff] = useState<EstimateHandoffStatus>(
     workOrder.estimate_handoff_status
   );
-  const [savedBanner, setSavedBanner] = useState<string | null>(null);
+  // Toast: { type: "success"|"error"; message: string }
+  const [toast, setToast]           = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [savingStatus, setSavingStatus] = useState(false);
   const [ghlSyncFailed, setGhlSyncFailed] = useState<boolean>(workOrder.ghl_sync_failed ?? false);
-  const [retrying, setRetrying] = useState(false);
+  const [retrying, setRetrying]     = useState(false);
   const [downloadingReport, setDownloadingReport] = useState(false);
+
+  // Estimate needed dialog
+  const [estimateDialogOpen, setEstimateDialogOpen] = useState(false);
+  const [estimateNotes, setEstimateNotes]           = useState("");
+  const [savingEstimate, setSavingEstimate]         = useState(false);
+
+  // Status history
+  const [history, setHistory]           = useState<StatusHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
 
   // Property linking state
   const [propertyId,       setPropertyId]       = useState<string>(workOrder.property_id ?? "");
@@ -321,6 +334,27 @@ export function WorkOrderDetail({
   const [loadingTechs,     setLoadingTechs]      = useState(false);
   const [savingTech,       setSavingTech]        = useState(false);
 
+  // Load status history
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(`/api/work-orders/${workOrder.id}/history`);
+      const json = (await res.json()) as { data?: StatusHistoryEntry[] };
+      setHistory(json.data ?? []);
+    } catch {
+      // Non-fatal
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [workOrder.id]);
+
+  useEffect(() => { void loadHistory(); }, [loadHistory]);
+
+  function showToast(msg: string, type: "success" | "error" = "success") {
+    setToast({ type, message: msg });
+    setTimeout(() => setToast(null), 3000);
+  }
+
   const handleRetrySync = useCallback(async () => {
     setRetrying(true);
     try {
@@ -331,12 +365,12 @@ export function WorkOrderDetail({
       });
       if (res.ok) {
         setGhlSyncFailed(false);
-        setSavedBanner("GHL sync retry queued — check Vercel logs for result.");
+        showToast("GHL sync retry queued — check Vercel logs for result.");
       } else {
-        setSavedBanner("Retry request failed. Please try again.");
+        showToast("Retry request failed. Please try again.", "error");
       }
     } catch {
-      setSavedBanner("Network error — retry request could not be sent.");
+      showToast("Network error — retry request could not be sent.", "error");
     } finally {
       setRetrying(false);
     }
@@ -358,7 +392,7 @@ export function WorkOrderDetail({
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      setSavedBanner(e instanceof Error ? e.message : "Failed to generate report");
+      showToast(e instanceof Error ? e.message : "Failed to generate report", "error");
     } finally {
       setDownloadingReport(false);
     }
@@ -397,9 +431,9 @@ export function WorkOrderDetail({
       setPropertyName(prop.customer_name);
       setPropertyAddress(`${prop.address_line1}, ${prop.city}, ${prop.state} ${prop.zip}`);
       setLinkingProperty(false);
-      setSavedBanner("Property linked successfully.");
+      showToast("Property linked successfully.");
     } catch (e) {
-      setSavedBanner(e instanceof Error ? e.message : "Failed to link property");
+      showToast(e instanceof Error ? e.message : "Failed to link property", "error");
     } finally {
       setSavingProperty(false);
     }
@@ -436,43 +470,81 @@ export function WorkOrderDetail({
       setTechnicianId(tech.id);
       setTechnicianName(tech.name);
       setLinkingTech(false);
-      setSavedBanner("Technician assigned successfully.");
+      showToast("Technician assigned successfully.");
     } catch (e) {
-      setSavedBanner(e instanceof Error ? e.message : "Failed to assign technician");
+      showToast(e instanceof Error ? e.message : "Failed to assign technician", "error");
     } finally {
       setSavingTech(false);
     }
   }, [workOrder.id]);
 
   const allowedTransitions = WORK_ORDER_STATUS_TRANSITIONS[status];
-  const canFlagEstimate = allowedTransitions.includes(WorkOrderStatus.ESTIMATE_NEEDED);
+  // Estimate flag: show when not already flagged, completed, or cancelled
+  const showEstimateButton =
+    status !== WorkOrderStatus.ESTIMATE_NEEDED &&
+    status !== WorkOrderStatus.COMPLETED &&
+    status !== WorkOrderStatus.CANCELLED;
   const isTerminal = status === WorkOrderStatus.CANCELLED;
+  const isCompleted = status === WorkOrderStatus.COMPLETED;
 
-  function applyStatusChange(newStatus: WorkOrderStatus) {
-    const prevLabel = STATUS_CONFIG[status].label;
-    const nextLabel = STATUS_CONFIG[newStatus].label;
-    setStatus(newStatus);
-    if (newStatus === WorkOrderStatus.ESTIMATE_NEEDED) {
-      setEstimateHandoff(EstimateHandoffStatus.FLAGGED);
+  // Real PATCH call for status changes
+  const applyStatusChange = useCallback(async (newStatus: WorkOrderStatus) => {
+    setSavingStatus(true);
+    try {
+      const res = await fetch(`/api/work-orders/${workOrder.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        showToast(json.error ?? "Failed to update status", "error");
+        return;
+      }
+      setStatus(newStatus);
+      showToast(`Status updated to ${STATUS_CONFIG[newStatus].label}`);
+      void loadHistory();
+    } catch {
+      showToast("Network error — status not saved", "error");
+    } finally {
+      setSavingStatus(false);
     }
-    setSavedBanner(`Status changed from "${prevLabel}" → "${nextLabel}" (mock — not persisted)`);
-  }
+  }, [workOrder.id, loadHistory]);
 
-  useEffect(() => {
-    if (!savedBanner) return;
-    const t = setTimeout(() => setSavedBanner(null), 5000);
-    return () => clearTimeout(t);
-  }, [savedBanner]);
+  // Estimate needed dialog submit
+  const handleFlagEstimate = useCallback(async () => {
+    if (!estimateNotes.trim()) return;
+    setSavingEstimate(true);
+    try {
+      const res = await fetch(`/api/work-orders/${workOrder.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: WorkOrderStatus.ESTIMATE_NEEDED,
+          estimate_handoff_status: EstimateHandoffStatus.FLAGGED,
+          estimate_notes: estimateNotes.trim(),
+        }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        showToast(json.error ?? "Failed to flag estimate", "error");
+        return;
+      }
+      setStatus(WorkOrderStatus.ESTIMATE_NEEDED);
+      setEstimateHandoff(EstimateHandoffStatus.FLAGGED);
+      setEstimateDialogOpen(false);
+      setEstimateNotes("");
+      showToast("Estimate flagged and sent to GHL");
+      void loadHistory();
+    } catch {
+      showToast("Network error — estimate not saved", "error");
+    } finally {
+      setSavingEstimate(false);
+    }
+  }, [workOrder.id, estimateNotes, loadHistory]);
 
   const statusCfg = STATUS_CONFIG[status];
   const priorityCfg = PRIORITY_CONFIG[workOrder.priority];
-
-  const statusHistory = [
-    { icon: CircleDot, label: "Work order created", time: formatDateTime(workOrder.created_at), isCurrent: false },
-    ...(workOrder.status !== WorkOrderStatus.NEW
-      ? [{ icon: CheckCircle2, label: `Status: ${statusCfg.label}`, time: formatDateTime(workOrder.updated_at), isCurrent: true }]
-      : []),
-  ];
 
   return (
     <div className="mx-auto max-w-7xl space-y-5">
@@ -498,11 +570,29 @@ export function WorkOrderDetail({
         </div>
       )}
 
-      {/* Save confirmation banner */}
-      {savedBanner && (
-        <div className="flex items-start gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-800">
-          <Info className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{savedBanner}</span>
+      {/* Toast */}
+      {toast && (
+        <div className={cn(
+          "flex items-center gap-2 rounded-lg border px-4 py-3 text-sm",
+          toast.type === "success"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : "border-red-200 bg-red-50 text-red-800"
+        )}>
+          {toast.type === "success"
+            ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+            : <AlertTriangle className="h-4 w-4 shrink-0 text-red-500" />}
+          <span>{toast.message}</span>
+          <button type="button" onClick={() => setToast(null)} className="ml-auto rounded p-0.5 opacity-60 hover:opacity-100">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Completed warning */}
+      {isCompleted && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+          <span>This job is marked complete. Changes will reopen the work order.</span>
         </div>
       )}
 
@@ -551,50 +641,105 @@ export function WorkOrderDetail({
               {downloadingReport ? "Generating…" : "Download Report"}
             </button>
 
+          {/* Estimate button */}
+          {showEstimateButton && (
+            <button
+              type="button"
+              onClick={() => setEstimateDialogOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-amber-400 px-3.5 py-2 text-sm font-medium text-amber-600 transition-colors hover:bg-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+            >
+              <AlertTriangle className="h-4 w-4" />
+              Estimate Needed
+            </button>
+          )}
+          {status === WorkOrderStatus.ESTIMATE_NEEDED && (
+            <span className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2 text-sm font-medium text-amber-700">
+              <AlertTriangle className="h-4 w-4" />
+              Estimate Flagged
+            </span>
+          )}
+
+          {/* Status change dropdown — filters out ESTIMATE_NEEDED (handled by button) */}
           {!isTerminal && (
-            <>
-              {canFlagEstimate && (
-                <button
-                  type="button"
-                  onClick={() => applyStatusChange(WorkOrderStatus.ESTIMATE_NEEDED)}
-                  className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3.5 py-2 text-sm font-semibold text-amber-800 transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
-                >
-                  <AlertTriangle className="h-4 w-4" />
-                  Flag Estimate Needed
-                </button>
-              )}
-
-              {allowedTransitions.length > 0 && (
-                <select
-                  key={status}
-                  defaultValue=""
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      applyStatusChange(e.target.value as WorkOrderStatus);
-                    }
-                  }}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200"
-                  aria-label="Change work order status"
-                >
-                  <option value="" disabled>Change status…</option>
-                  {allowedTransitions
-                    .filter((s) => s !== WorkOrderStatus.ESTIMATE_NEEDED)
-                    .map((s) => (
-                      <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>
-                    ))}
-                </select>
-              )}
-
-              {isTerminal && (
-                <span className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm text-slate-400">
-                  No further transitions
-                </span>
-              )}
-            </>
+            <div className="relative">
+              <select
+                key={status}
+                defaultValue=""
+                disabled={savingStatus}
+                onChange={(e) => {
+                  if (e.target.value) void applyStatusChange(e.target.value as WorkOrderStatus);
+                }}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:opacity-50"
+                aria-label="Change work order status"
+              >
+                <option value="" disabled>
+                  {savingStatus ? "Saving…" : "Change status…"}
+                </option>
+                {allowedTransitions
+                  .filter((s) => s !== WorkOrderStatus.ESTIMATE_NEEDED)
+                  .map((s) => (
+                    <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>
+                  ))}
+              </select>
+            </div>
           )}
           </div>
         </div>
       </div>
+
+      {/* Estimate Needed Dialog */}
+      {estimateDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => { if (!savingEstimate) setEstimateDialogOpen(false); }}
+          />
+          <div className="relative w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100">
+                <AlertTriangle className="h-5 w-5 text-amber-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">Flag as Estimate Needed</h3>
+                <p className="mt-0.5 text-sm text-slate-500">
+                  Describe what needs to be quoted. This will be sent to GHL.
+                </p>
+              </div>
+            </div>
+
+            <textarea
+              value={estimateNotes}
+              onChange={(e) => setEstimateNotes(e.target.value)}
+              placeholder="e.g. Pump motor is failing and needs replacement. Estimated repair needed before next service visit."
+              rows={4}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-100 resize-none"
+            />
+            {estimateNotes.trim() === "" && savingEstimate === false && (
+              <p className="mt-1 text-xs text-slate-400">Required — cannot submit empty</p>
+            )}
+
+            <div className="mt-4 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => { setEstimateDialogOpen(false); setEstimateNotes(""); }}
+                disabled={savingEstimate}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleFlagEstimate()}
+                disabled={savingEstimate || !estimateNotes.trim()}
+                className="flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
+              >
+                {savingEstimate && <Loader2 className="h-4 w-4 animate-spin" />}
+                Flag Estimate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Two-column body */}
       <div className="grid gap-5 lg:grid-cols-3">
@@ -823,9 +968,18 @@ export function WorkOrderDetail({
                   <button
                     type="button"
                     className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-500 px-3.5 py-2 text-sm font-semibold text-white hover:bg-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
-                    onClick={() => {
-                      setEstimateHandoff(EstimateHandoffStatus.SENT_TO_GHL);
-                      setSavedBanner("Estimate sent to GHL (mock — not persisted)");
+                    onClick={async () => {
+                      const res = await fetch(`/api/work-orders/${workOrder.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ estimate_handoff_status: EstimateHandoffStatus.SENT_TO_GHL }),
+                      });
+                      if (res.ok) {
+                        setEstimateHandoff(EstimateHandoffStatus.SENT_TO_GHL);
+                        showToast("Estimate sent to GHL");
+                      } else {
+                        showToast("Failed to update GHL status", "error");
+                      }
                     }}
                   >
                     <ExternalLink className="h-4 w-4" />
@@ -846,29 +1000,51 @@ export function WorkOrderDetail({
 
           {/* Status History */}
           <SectionCard title="Status History">
-            <ol className="space-y-4">
-              {statusHistory.map((entry, i) => {
-                const Icon = entry.icon;
-                return (
-                  <li key={i} className="flex items-start gap-3">
-                    <div className={cn(
-                      "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full",
-                      entry.isCurrent
-                        ? "bg-brand-100 text-brand-600"
-                        : "bg-slate-100 text-slate-400"
-                    )}>
-                      <Icon className="h-3.5 w-3.5" />
+            {historyLoading ? (
+              <div className="space-y-3">
+                {[1, 2].map((i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <div className="mt-0.5 h-6 w-6 animate-pulse rounded-full bg-slate-200 shrink-0" />
+                    <div className="space-y-1.5 flex-1">
+                      <div className="h-3 w-40 animate-pulse rounded bg-slate-200" />
+                      <div className="h-3 w-24 animate-pulse rounded bg-slate-200" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <ol className="space-y-4">
+                {/* Newest history entries first */}
+                {history.map((entry) => (
+                  <li key={entry.id} className="flex items-start gap-3">
+                    <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-100 text-brand-600">
+                      <ArrowRightLeft className="h-3.5 w-3.5" />
                     </div>
                     <div>
-                      <p className={cn("text-sm font-medium", entry.isCurrent ? "text-slate-800" : "text-slate-600")}>
-                        {entry.label}
+                      <p className="text-sm font-medium text-slate-800">
+                        {entry.previous_status
+                          ? `${STATUS_CONFIG[entry.previous_status as WorkOrderStatus]?.label ?? entry.previous_status} → ${STATUS_CONFIG[entry.new_status as WorkOrderStatus]?.label ?? entry.new_status}`
+                          : STATUS_CONFIG[entry.new_status as WorkOrderStatus]?.label ?? entry.new_status}
                       </p>
-                      <p className="text-xs text-slate-400">{entry.time}</p>
+                      <p className="text-xs text-slate-400">
+                        {formatDateTime(entry.changed_at)}
+                        {entry.changed_by_name ? ` · by ${entry.changed_by_name}` : ""}
+                      </p>
                     </div>
                   </li>
-                );
-              })}
-            </ol>
+                ))}
+                {/* Work order created — always last */}
+                <li className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                    <CircleDot className="h-3.5 w-3.5" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-slate-600">Work order created</p>
+                    <p className="text-xs text-slate-400">{formatDateTime(workOrder.created_at)}</p>
+                  </div>
+                </li>
+              </ol>
+            )}
           </SectionCard>
         </div>
 

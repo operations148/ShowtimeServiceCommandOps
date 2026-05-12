@@ -5,9 +5,10 @@ import {
   updateWorkOrder,
   deleteWorkOrder,
 } from "@/lib/db/queries/work-orders";
-import { WorkOrderStatus } from "@/types/work-order";
+import { WorkOrderStatus, EstimateHandoffStatus } from "@/types/work-order";
 import { syncCompletionToGhl } from "@/lib/ghl/sync-completion";
 import { requireApiAuth, requirePermission, isTechnicianScoped, getTenantId } from "@/lib/auth/api-auth";
+import { db } from "@/lib/db/client";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -86,12 +87,14 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     );
   }
 
-  // Extract retry_ghl_sync flag before passing to DB — it's not a DB column.
-  const { retry_ghl_sync: retryGhlSync, ...dbPatch } = result.data;
+  // Extract non-DB fields before passing to update layer
+  const { retry_ghl_sync: retryGhlSync, estimate_notes: estimateNotes, ...dbPatch } = result.data;
+  // estimate_notes IS a DB column — include it back in the patch
+  const fullDbPatch = estimateNotes !== undefined ? { ...dbPatch, estimate_notes: estimateNotes } : dbPatch;
 
   let updateResult;
   try {
-    updateResult = await updateWorkOrder(id, dbPatch, tenantId);
+    updateResult = await updateWorkOrder(id, fullDbPatch, tenantId);
   } catch (err) {
     console.error("[api] PATCH /api/work-orders/[id] failed:", err);
     return NextResponse.json({ error: "Failed to update work order" }, { status: 500 });
@@ -112,6 +115,60 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   }
 
   const updatedWo = updateResult.data;
+  const changedByName = (auth.session.user as { name?: string }).name ?? "Admin";
+
+  // ── Status history log ─────────────────────────────────────────────────────
+  if (fullDbPatch.status && fullDbPatch.status !== workOrder.status) {
+    db.from("work_order_status_history")
+      .insert({
+        work_order_id:    id,
+        tenant_id:        tenantId,
+        previous_status:  workOrder.status,
+        new_status:       fullDbPatch.status,
+        changed_by_name:  changedByName,
+      })
+      .then(({ error }) => {
+        if (error) console.error("[api] status history insert:", error.message);
+      });
+  }
+
+  // ── Estimate handoff upsert ────────────────────────────────────────────────
+  // When flagging estimate: upsert estimate_handoffs with notes.
+  // When changing estimate_handoff_status to non-flagged: update existing record.
+  if (fullDbPatch.estimate_handoff_status === EstimateHandoffStatus.FLAGGED) {
+    db.from("estimate_handoffs")
+      .upsert(
+        {
+          tenant_id:     tenantId,
+          work_order_id: id,
+          status:        EstimateHandoffStatus.FLAGGED,
+          notes:         estimateNotes ?? null,
+          flagged_at:    new Date().toISOString(),
+        },
+        { onConflict: "work_order_id" }
+      )
+      .then(({ error }) => {
+        if (error) console.error("[api] estimate_handoffs upsert:", error.message);
+      });
+  } else if (fullDbPatch.estimate_handoff_status) {
+    const tsField: Record<string, string> = {
+      [EstimateHandoffStatus.SENT_TO_GHL]:   "sent_to_ghl_at",
+      [EstimateHandoffStatus.ESTIMATE_SENT]: "estimate_sent_at",
+      [EstimateHandoffStatus.APPROVED]:      "approved_at",
+      [EstimateHandoffStatus.DECLINED]:      "declined_at",
+    };
+    const updateFields: Record<string, unknown> = { status: fullDbPatch.estimate_handoff_status };
+    if (tsField[fullDbPatch.estimate_handoff_status]) {
+      updateFields[tsField[fullDbPatch.estimate_handoff_status]] = new Date().toISOString();
+    }
+    db.from("estimate_handoffs")
+      .update(updateFields)
+      .eq("work_order_id", id)
+      .eq("tenant_id", tenantId)
+      .then(({ error }) => {
+        if (error) console.error("[api] estimate_handoffs update:", error.message);
+      });
+  }
 
   // Trigger GHL sync when status transitions to COMPLETED, or when the
   // client explicitly requests a retry (retry_ghl_sync: true) after a

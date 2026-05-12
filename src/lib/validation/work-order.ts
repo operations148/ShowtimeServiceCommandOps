@@ -102,6 +102,13 @@ export const PatchWorkOrderSchema = z.object({
     .optional()
     .or(z.literal(""))
     .transform((v) => (v === "" ? undefined : v)),
+
+  estimate_notes: z
+    .string()
+    .max(2000)
+    .optional()
+    .or(z.literal(""))
+    .transform((v) => (v === "" ? undefined : v)),
 });
 
 export type PatchWorkOrderInput = z.infer<typeof PatchWorkOrderSchema>;

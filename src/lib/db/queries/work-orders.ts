@@ -59,6 +59,7 @@ type WoJoinedRow = {
   scheduled_time_end: string | null;
   completed_at: string | null;
   estimate_handoff_status: string;
+  estimate_notes: string | null;
   ghl_sync_failed: boolean;
   recurring_schedule_id: string | null;
   created_at: string;
@@ -88,6 +89,7 @@ function mapRow(row: WoJoinedRow): WorkOrderWithRelations {
     scheduled_time_end:     trimTime(row.scheduled_time_end),
     completed_at:           nullToUndef(row.completed_at),
     estimate_handoff_status: row.estimate_handoff_status as EstimateHandoffStatus,
+    estimate_notes:         nullToUndef(row.estimate_notes),
     ghl_sync_failed:        row.ghl_sync_failed || undefined,
     recurring_schedule_id:  nullToUndef(row.recurring_schedule_id),
     created_at:             row.created_at,
@@ -326,7 +328,7 @@ export async function updateWorkOrder(
         },
       };
     }
-    // Auto-set completed_at when transitioning to COMPLETED
+    // Auto-set completed_at when transitioning TO COMPLETED
     if (finalPatch.status === WorkOrderStatus.COMPLETED && !finalPatch.completed_at) {
       finalPatch = { ...finalPatch, completed_at: new Date().toISOString() };
     }
@@ -346,6 +348,14 @@ export async function updateWorkOrder(
   const updatePayload: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(rest)) {
     if (v !== undefined) updatePayload[k] = v;
+  }
+  // Clear completed_at when leaving COMPLETED status
+  if (
+    (current.status as WorkOrderStatus) === WorkOrderStatus.COMPLETED &&
+    finalPatch.status !== WorkOrderStatus.COMPLETED &&
+    finalPatch.status !== undefined
+  ) {
+    updatePayload.completed_at = null;
   }
 
   let updateQuery = db.from("work_orders").update(updatePayload).eq("id", id);

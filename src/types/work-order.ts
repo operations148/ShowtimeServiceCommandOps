@@ -58,6 +58,7 @@ export interface WorkOrder {
   scheduled_time_end?: string;   // "HH:MM"
   completed_at?: string;         // ISO datetime string
   estimate_handoff_status: EstimateHandoffStatus;
+  estimate_notes?: string;
   /** Set true when an outbound GHL sync attempt failed after all retries.
    *  Cleared automatically if a subsequent sync succeeds. */
   ghl_sync_failed?: boolean;
@@ -92,10 +93,11 @@ export interface WorkOrderWithRelations extends WorkOrder {
 // Allowed status transitions. Key = current status, value = allowed next statuses.
 // Used for validation in API routes and UI button state.
 export const WORK_ORDER_STATUS_TRANSITIONS: Record<WorkOrderStatus, WorkOrderStatus[]> = {
-  [WorkOrderStatus.NEW]: [WorkOrderStatus.ASSIGNED, WorkOrderStatus.CANCELLED],
+  [WorkOrderStatus.NEW]: [WorkOrderStatus.ASSIGNED, WorkOrderStatus.ESTIMATE_NEEDED, WorkOrderStatus.CANCELLED],
   [WorkOrderStatus.ASSIGNED]: [
     WorkOrderStatus.IN_PROGRESS,
-    WorkOrderStatus.NEW,        // unassign → back to NEW
+    WorkOrderStatus.NEW,
+    WorkOrderStatus.ESTIMATE_NEEDED,
     WorkOrderStatus.CANCELLED,
   ],
   [WorkOrderStatus.IN_PROGRESS]: [
@@ -105,9 +107,9 @@ export const WORK_ORDER_STATUS_TRANSITIONS: Record<WorkOrderStatus, WorkOrderSta
   ],
   [WorkOrderStatus.COMPLETED]: [WorkOrderStatus.NEEDS_FOLLOW_UP],
   [WorkOrderStatus.ESTIMATE_NEEDED]: [
-    WorkOrderStatus.IN_PROGRESS, // estimate declined, continue job
+    WorkOrderStatus.IN_PROGRESS,
     WorkOrderStatus.CANCELLED,
   ],
-  [WorkOrderStatus.NEEDS_FOLLOW_UP]: [WorkOrderStatus.ASSIGNED],
-  [WorkOrderStatus.CANCELLED]: [], // terminal
+  [WorkOrderStatus.NEEDS_FOLLOW_UP]: [WorkOrderStatus.ASSIGNED, WorkOrderStatus.ESTIMATE_NEEDED],
+  [WorkOrderStatus.CANCELLED]: [],
 };

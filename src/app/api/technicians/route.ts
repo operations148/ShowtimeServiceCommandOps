@@ -9,20 +9,25 @@ import { CreateTechnicianSchema } from "@/lib/validation/technician";
 // Returns all active technicians for the current tenant.
 // ---------------------------------------------------------------------------
 
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
   const auth = await requireApiAuth();
   if (!auth.ok) return auth.response;
   const tenantId = getTenantId(auth.session);
 
+  const includeAll = request.nextUrl.searchParams.get("all") === "true";
+
   let data, error;
   try {
-    ({ data, error } = await db
+    let query = db
       .from("users")
-      .select("id, name, email, phone")
+      .select("id, name, email, phone, is_active")
       .eq("tenant_id", tenantId)
       .eq("role", "technician")
-      .eq("is_active", true)
-      .order("name", { ascending: true }));
+      .order("name", { ascending: true });
+
+    if (!includeAll) query = query.eq("is_active", true);
+
+    ({ data, error } = await query);
   } catch (err) {
     console.error("[api] GET /api/technicians failed:", err);
     return NextResponse.json({ data: [] });
