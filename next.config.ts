@@ -9,6 +9,15 @@ const withPWA = require("next-pwa")({
 });
 
 const nextConfig: NextConfig = withPWA({
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '*.supabase.co',
+        pathname: '/storage/v1/object/public/**',
+      },
+    ],
+  },
   serverExternalPackages: [
     "@react-pdf/renderer",
     "@react-pdf/font",

@@ -10,9 +10,10 @@ interface ProfilePanelProps {
   open: boolean;
   onClose: () => void;
   onAvatarUpdated: (url: string | null) => void;
+  avatarOverride: string | null;
 }
 
-export function ProfilePanel({ open, onClose, onAvatarUpdated }: ProfilePanelProps) {
+export function ProfilePanel({ open, onClose, onAvatarUpdated, avatarOverride }: ProfilePanelProps) {
   const { data: session } = useSession();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -24,7 +25,7 @@ export function ProfilePanel({ open, onClose, onAvatarUpdated }: ProfilePanelPro
   const name = session?.user?.name ?? "User";
   const email = session?.user?.email ?? "";
   const role = (session?.user?.role ?? "").replace(/_/g, " ").toLowerCase();
-  const avatarUrl = session?.user?.avatar_url ?? null;
+  const avatarUrl = avatarOverride ?? session?.user?.avatar_url ?? null;
 
   const initials = name
     .split(" ")

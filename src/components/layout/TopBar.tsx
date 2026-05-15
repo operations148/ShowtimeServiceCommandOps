@@ -131,6 +131,7 @@ export function TopBar({ onMenuClick }: TopBarProps) {
         open={panelOpen}
         onClose={() => setPanelOpen(false)}
         onAvatarUpdated={handleAvatarUpdated}
+        avatarOverride={avatarOverride}
       />
     </>
   );
