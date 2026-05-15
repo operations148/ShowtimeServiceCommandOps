@@ -519,7 +519,7 @@ function CompletionReportDocument({ data }: { data: ReportData }) {
             {checklist.map((item) => (
               <View key={item.id} style={styles.checklistItem}>
                 <View style={[styles.checkIcon, item.completed ? styles.checkIconDone : styles.checkIconPending]}>
-                  <Text style={styles.checkIconText}>{item.completed ? "✓" : "✗"}</Text>
+                  <Text style={styles.checkIconText}>{item.completed ? "+" : "-"}</Text>
                 </View>
                 <Text style={item.completed ? styles.checkLabel : styles.checkLabelIncomplete}>
                   {item.label}
