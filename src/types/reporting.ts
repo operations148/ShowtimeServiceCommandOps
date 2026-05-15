@@ -121,6 +121,37 @@ export interface VAPerformanceData {
   dataSource: 'live' | 'mock' | 'cached'
 }
 
+// ─── Tech Performance (live from platform DB) ─────────────────────────────────
+
+export interface TechPerformanceRow {
+  userId: string
+  name: string
+  avatarInitials: string
+  totalAssigned: number
+  completed: number
+  inProgress: number
+  estimateNeeded: number
+  completionRate: number      // 0-100 percentage
+  avgDaysToComplete: number
+}
+
+export interface TechPerformanceData {
+  team: TechPerformanceRow[]
+  summary: {
+    totalAssigned: number
+    totalCompleted: number
+    avgCompletionRate: number
+    totalInProgress: number
+  }
+  trends: {
+    completedJobs: TrendPoint[]
+    newJobs: TrendPoint[]
+  }
+  filters: ReportingFilters
+  generatedAt: string
+  dataSource: 'live' | 'mock' | 'cached'
+}
+
 // ─── Marketing Performance ────────────────────────────────────────────────────
 
 export interface SourceBreakdownItem {

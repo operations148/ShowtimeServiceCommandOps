@@ -11,8 +11,8 @@ const TABS = [
   },
   {
     id: 'va',
-    label: 'VA Performance',
-    description: 'Team response times and booking rates',
+    label: 'Tech Performance',
+    description: 'Technician job completion and workload',
     href: '/dashboard/reports/va',
   },
   {

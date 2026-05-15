@@ -9,7 +9,16 @@ const withPWA = require("next-pwa")({
 });
 
 const nextConfig: NextConfig = withPWA({
-  serverExternalPackages: ["@react-pdf/renderer"],
+  serverExternalPackages: [
+    "@react-pdf/renderer",
+    "@react-pdf/font",
+    "@react-pdf/layout",
+    "@react-pdf/primitives",
+    "@react-pdf/fns",
+    "@react-pdf/stylesheet",
+    "@react-pdf/textkit",
+    "@react-pdf/png-js",
+  ],
 } satisfies NextConfig);
 
 export default nextConfig;

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useRef } from "react";
 import {
   Building2,
   Zap,
@@ -15,7 +16,9 @@ import {
   Copy,
   Check,
   Upload,
+  Trash2,
   ExternalLink,
+  Loader2,
 } from "lucide-react";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { cn } from "@/lib/utils";
@@ -214,6 +217,10 @@ function CompanyProfileSection() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
 
   const loadProfile = useCallback(async () => {
     try {
@@ -221,6 +228,7 @@ function CompanyProfileSection() {
       const json = (await res.json()) as { data?: CompanyProfile; error?: string };
       if (json.data) {
         setProfile(json.data);
+        setLogoUrl(json.data.logo_url ?? null);
         setForm({
           name:           json.data.name ?? "",
           owner_name:     json.data.owner_name ?? "",
@@ -258,6 +266,42 @@ function CompanyProfileSection() {
       setError("Network error — please try again");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLogoError(null);
+    setUploadingLogo(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/settings/company/logo", { method: "POST", body: fd });
+      const json = (await res.json()) as { data?: { url: string }; error?: string };
+      if (!res.ok) {
+        setLogoError(json.error ?? "Upload failed");
+      } else if (json.data?.url) {
+        setLogoUrl(json.data.url);
+      }
+    } catch {
+      setLogoError("Upload failed. Please try again.");
+    } finally {
+      setUploadingLogo(false);
+      if (logoInputRef.current) logoInputRef.current.value = "";
+    }
+  }
+
+  async function handleLogoRemove() {
+    setLogoError(null);
+    setUploadingLogo(true);
+    try {
+      await fetch("/api/settings/company/logo", { method: "DELETE" });
+      setLogoUrl(null);
+    } catch {
+      setLogoError("Failed to remove logo.");
+    } finally {
+      setUploadingLogo(false);
     }
   }
 
@@ -303,13 +347,40 @@ function CompanyProfileSection() {
           </FieldRow>
 
           <FieldRow label="Logo">
-            <button
-              type="button"
-              className="flex items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-2.5 text-sm text-slate-500 hover:border-slate-400 hover:bg-slate-100 transition-colors"
-            >
-              <Upload className="h-4 w-4" />
-              Upload logo (coming soon)
-            </button>
+            <div className="flex items-center gap-3 flex-wrap">
+              {logoUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={logoUrl} alt="Company logo" className="h-10 max-w-[160px] rounded border border-slate-200 object-contain bg-white p-1" />
+              )}
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/svg+xml"
+                className="sr-only"
+                onChange={handleLogoUpload}
+              />
+              <button
+                type="button"
+                onClick={() => logoInputRef.current?.click()}
+                disabled={uploadingLogo}
+                className="flex items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-2.5 text-sm text-slate-500 hover:border-brand-400 hover:bg-brand-50 hover:text-brand-600 transition-colors disabled:opacity-50"
+              >
+                {uploadingLogo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {uploadingLogo ? "Uploading…" : logoUrl ? "Replace logo" : "Upload logo"}
+              </button>
+              {logoUrl && !uploadingLogo && (
+                <button
+                  type="button"
+                  onClick={handleLogoRemove}
+                  className="flex items-center gap-1.5 rounded-lg px-3 py-2.5 text-sm text-red-500 hover:bg-red-50 transition-colors"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Remove
+                </button>
+              )}
+            </div>
+            {logoError && <p className="mt-1.5 text-xs text-red-600">{logoError}</p>}
+            <p className="mt-1 text-xs text-slate-400">JPEG, PNG, WebP or SVG · max 5 MB</p>
           </FieldRow>
 
           {error && (

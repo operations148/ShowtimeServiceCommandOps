@@ -15,6 +15,7 @@ export interface CompanyProfile {
   business_phone: string | null;
   business_email: string | null;
   service_area: string | null;
+  logo_url: string | null;
   ghl_location_id: string | null;
   last_webhook_at: string | null;
 }
@@ -42,7 +43,7 @@ export async function GET() {
 
   const { data, error } = await db
     .from("tenants")
-    .select("id, name, slug, owner_name, business_phone, business_email, service_area, ghl_location_id, last_webhook_at")
+    .select("id, name, slug, owner_name, business_phone, business_email, service_area, logo_url, ghl_location_id, last_webhook_at")
     .eq("id", tenantId)
     .single();
 
@@ -86,7 +87,7 @@ export async function PATCH(request: NextRequest) {
     .from("tenants")
     .update(result.data)
     .eq("id", tenantId)
-    .select("id, name, slug, owner_name, business_phone, business_email, service_area, ghl_location_id, last_webhook_at")
+    .select("id, name, slug, owner_name, business_phone, business_email, service_area, logo_url, ghl_location_id, last_webhook_at")
     .single();
 
   if (error) {

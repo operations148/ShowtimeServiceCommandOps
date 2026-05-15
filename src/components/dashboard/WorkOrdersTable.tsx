@@ -109,14 +109,14 @@ function RowActionsMenu({
             <Eye className="h-4 w-4 text-slate-400" />
             View Details
           </Link>
-          <button
-            type="button"
+          <Link
+            href={`/dashboard/work-orders/${wo.id}`}
             onClick={() => setOpen(false)}
-            className="flex w-full items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+            className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
           >
             <Pencil className="h-4 w-4 text-slate-400" />
             Edit
-          </button>
+          </Link>
           <div className="my-1 border-t border-border" />
           <button
             type="button"
