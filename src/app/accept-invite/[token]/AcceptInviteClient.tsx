@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { signOut } from 'next-auth/react'
 import { AlertCircle, CheckCircle2, Eye, EyeOff, Loader2, Droplets } from 'lucide-react'
 
 interface Props {
@@ -48,7 +49,8 @@ export function AcceptInviteClient({ token }: Props) {
       }
 
       setSuccess(true)
-      setTimeout(() => router.push('/login'), 3000)
+      // Sign out any existing session so the new member must log in as themselves
+      setTimeout(() => signOut({ callbackUrl: '/login' }), 2500)
     } catch {
       setError('Network error. Please check your connection and try again.')
     } finally {
