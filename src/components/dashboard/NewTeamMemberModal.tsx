@@ -1,17 +1,16 @@
 'use client'
 
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { AlertCircle, CheckCircle2, Eye, EyeOff, Loader2, X } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Loader2, Mail, X } from 'lucide-react'
 import { z } from 'zod'
 import { cn } from '@/lib/utils'
 import { ASSIGNABLE_ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS, type TeamMemberRole } from '@/types/team'
 
 const Schema = z.object({
-  name:     z.string().min(2, 'Name must be at least 2 characters').max(120).transform(v => v.trim()),
-  email:    z.string().email('Enter a valid email address').transform(v => v.toLowerCase().trim()),
-  phone:    z.string().max(30).optional(),
-  role:     z.enum(['tenant_admin', 'office_staff', 'read_only_owner'] as const),
-  password: z.string().min(8, 'Password must be at least 8 characters').max(128),
+  name:  z.string().min(2, 'Name must be at least 2 characters').max(120).transform(v => v.trim()),
+  email: z.string().email('Enter a valid email address').transform(v => v.toLowerCase().trim()),
+  phone: z.string().max(30).optional(),
+  role:  z.enum(['tenant_admin', 'office_staff', 'read_only_owner'] as const),
 })
 
 type FormValues = {
@@ -19,10 +18,9 @@ type FormValues = {
   email: string
   phone: string
   role: TeamMemberRole
-  password: string
 }
 
-const DEFAULTS: FormValues = { name: '', email: '', phone: '', role: 'office_staff', password: '' }
+const DEFAULTS: FormValues = { name: '', email: '', phone: '', role: 'office_staff' }
 
 const inputClass = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 shadow-sm focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:bg-slate-50 disabled:text-slate-400'
 const errorInputClass = 'border-red-300 focus:border-red-400 focus:ring-red-200'
@@ -39,7 +37,6 @@ export function NewTeamMemberModal({ open, onClose, onSuccess }: Props) {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [successName, setSuccessName] = useState<string | null>(null)
-  const [showPassword, setShowPassword] = useState(false)
   const nameRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -69,7 +66,6 @@ export function NewTeamMemberModal({ open, onClose, onSuccess }: Props) {
       setErrors({})
       setSubmitError(null)
       setSuccessName(null)
-      setShowPassword(false)
     }, 300)
   }
 
@@ -81,11 +77,10 @@ export function NewTeamMemberModal({ open, onClose, onSuccess }: Props) {
     if (!result.success) {
       const fe = result.error.flatten().fieldErrors
       setErrors({
-        name:     fe.name?.[0],
-        email:    fe.email?.[0],
-        phone:    fe.phone?.[0],
-        role:     fe.role?.[0],
-        password: fe.password?.[0],
+        name:  fe.name?.[0],
+        email: fe.email?.[0],
+        phone: fe.phone?.[0],
+        role:  fe.role?.[0],
       })
       return
     }
@@ -98,10 +93,10 @@ export function NewTeamMemberModal({ open, onClose, onSuccess }: Props) {
         body: JSON.stringify(result.data),
       })
       const json = await res.json() as { data?: { name: string }; error?: string }
-      if (!res.ok) throw new Error(json.error ?? 'Failed to create team member')
+      if (!res.ok) throw new Error(json.error ?? 'Failed to send invitation')
       setSuccessName(json.data!.name)
       onSuccess(json.data!.name)
-      setTimeout(() => handleClose(), 1800)
+      setTimeout(() => handleClose(), 2500)
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
     } finally {
@@ -132,7 +127,7 @@ export function NewTeamMemberModal({ open, onClose, onSuccess }: Props) {
         <div className="flex items-start justify-between border-b border-border px-6 py-4">
           <div>
             <h2 className="font-display text-lg font-bold text-slate-900">Invite Team Member</h2>
-            <p className="mt-0.5 text-sm text-slate-500">Create a platform login for a team member</p>
+            <p className="mt-0.5 text-sm text-slate-500">They'll receive an email to set their own password</p>
           </div>
           <button
             type="button"
@@ -149,12 +144,12 @@ export function NewTeamMemberModal({ open, onClose, onSuccess }: Props) {
           {successName ? (
             <div className="flex flex-col items-center justify-center gap-4 px-6 py-24 text-center">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100">
-                <CheckCircle2 className="h-8 w-8 text-emerald-500" />
+                <Mail className="h-8 w-8 text-emerald-500" />
               </div>
               <div>
-                <p className="font-display text-lg font-bold text-slate-900">Team member added</p>
+                <p className="font-display text-lg font-bold text-slate-900">Invitation sent!</p>
                 <p className="mt-1 text-sm font-semibold text-brand-600">{successName}</p>
-                <p className="mt-1 text-sm text-slate-500">Closing in a moment…</p>
+                <p className="mt-1 text-sm text-slate-500">They'll receive an email to set their password and activate their account.</p>
               </div>
             </div>
           ) : (
@@ -200,7 +195,7 @@ export function NewTeamMemberModal({ open, onClose, onSuccess }: Props) {
                 />
                 {errors.email
                   ? <p className="flex items-center gap-1 text-xs text-red-600"><AlertCircle className="h-3 w-3 shrink-0" />{errors.email}</p>
-                  : <p className="text-xs text-slate-400">Used to log in to the dashboard</p>
+                  : <p className="text-xs text-slate-400">An invite link will be emailed to this address</p>
                 }
               </div>
 
@@ -237,34 +232,12 @@ export function NewTeamMemberModal({ open, onClose, onSuccess }: Props) {
                 <p className="text-xs text-slate-400">{ROLE_DESCRIPTIONS[values.role]}</p>
               </div>
 
-              {/* Password */}
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="tm-password" className="text-sm font-medium text-slate-700">
-                  Password <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <input
-                    id="tm-password"
-                    type={showPassword ? 'text' : 'password'}
-                    value={values.password}
-                    onChange={e => set('password', e.target.value)}
-                    placeholder="Min 8 characters"
-                    maxLength={128}
-                    className={cn(inputClass, 'pr-10', errors.password && errorInputClass)}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(v => !v)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus-visible:outline-none"
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-                {errors.password
-                  ? <p className="flex items-center gap-1 text-xs text-red-600"><AlertCircle className="h-3 w-3 shrink-0" />{errors.password}</p>
-                  : <p className="text-xs text-slate-400">Share these credentials with the team member directly</p>
-                }
+              {/* Info box */}
+              <div className="flex items-start gap-2.5 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
+                <Mail className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+                <p className="text-xs text-blue-700 leading-relaxed">
+                  A secure invite link will be emailed to <strong>{values.email || 'the address above'}</strong>. They'll set their own password when they accept. The link expires in 7 days.
+                </p>
               </div>
             </form>
           )}
@@ -287,7 +260,7 @@ export function NewTeamMemberModal({ open, onClose, onSuccess }: Props) {
               disabled={isSubmitting}
               className="flex items-center gap-2 rounded-lg bg-brand-500 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-60"
             >
-              {isSubmitting ? <><Loader2 className="h-4 w-4 animate-spin" />Creating…</> : 'Invite Member'}
+              {isSubmitting ? <><Loader2 className="h-4 w-4 animate-spin" />Sending…</> : <><Mail className="h-4 w-4" />Send Invitation</>}
             </button>
           </div>
         )}

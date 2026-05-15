@@ -1,18 +1,18 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import bcrypt from 'bcryptjs'
+import { randomBytes } from 'crypto'
 import { requireApiAuth, requirePermission, getTenantId } from '@/lib/auth/api-auth'
 import { db } from '@/lib/db/client'
+import { sendInviteEmail } from '@/lib/email/invite'
 import type { TeamMember } from '@/types/team'
 
 const TEAM_ROLES = ['tenant_admin', 'office_staff', 'read_only_owner'] as const
 
 const CreateTeamMemberSchema = z.object({
-  name: z.string().min(2, 'Name must be at least 2 characters').max(120).transform(v => v.trim()),
+  name:  z.string().min(2, 'Name must be at least 2 characters').max(120).transform(v => v.trim()),
   email: z.string().email('Enter a valid email address').transform(v => v.toLowerCase().trim()),
   phone: z.string().max(30).transform(v => v.trim()).optional(),
-  role: z.enum(TEAM_ROLES, { message: 'Invalid role' }),
-  password: z.string().min(8, 'Password must be at least 8 characters').max(128),
+  role:  z.enum(TEAM_ROLES, { message: 'Invalid role' }),
 })
 
 export async function GET() {
@@ -53,8 +53,9 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const { name, email, phone, role, password } = result.data
+  const { name, email, phone, role } = result.data
 
+  // Check for duplicate email within tenant
   const { data: existing } = await db
     .from('users')
     .select('id')
@@ -66,17 +67,52 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'A user with that email already exists' }, { status: 409 })
   }
 
-  const password_hash = await bcrypt.hash(password, 12)
+  // Create inactive user with unusable random password hash
+  const unusableHash = randomBytes(32).toString('hex')
 
   const { data: newMember, error: insertError } = await db
     .from('users')
-    .insert({ tenant_id: tenantId, name, email, phone: phone ?? null, role, password_hash, is_active: true })
+    .insert({
+      tenant_id:     tenantId,
+      name,
+      email,
+      phone:         phone ?? null,
+      role,
+      password_hash: unusableHash,
+      is_active:     false,
+    })
     .select('id, tenant_id, name, email, phone, role, is_active, created_at')
     .single()
 
   if (insertError) {
     console.error('[api] POST /api/team failed:', insertError)
     return NextResponse.json({ error: 'Failed to create team member' }, { status: 500 })
+  }
+
+  // Create invite token
+  const { data: invite, error: inviteError } = await db
+    .from('user_invitations')
+    .insert({ user_id: newMember.id, tenant_id: tenantId })
+    .select('token')
+    .single()
+
+  if (inviteError || !invite) {
+    console.error('[api] POST /api/team invite creation failed:', inviteError)
+    // Don't fail the request — user is created, admin can resend invite later
+  } else {
+    // Get company name for the email
+    const { data: tenant } = await db
+      .from('tenants')
+      .select('name')
+      .eq('id', tenantId)
+      .maybeSingle()
+
+    const companyName = tenant?.name ?? 'ServiceOps'
+
+    // Fire-and-forget — never block the 201 response for email failures
+    void sendInviteEmail(email, name, role, companyName, invite.token as string).catch(err =>
+      console.error('[email] invite send failed:', err)
+    )
   }
 
   return NextResponse.json({ data: newMember as TeamMember }, { status: 201 })

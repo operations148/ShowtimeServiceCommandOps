@@ -74,7 +74,11 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
   try {
     pdfBuffer = await generateCompletionReportPdf({ workOrder, visit, photos, companyName });
   } catch (err) {
-    console.error("[api] GET /api/work-orders/[id]/report PDF generation failed:", err);
+    const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    console.error("[api] GET /api/work-orders/[id]/report PDF generation failed:", message);
+    if (stack) console.error("[api] PDF stack trace:", stack);
+    console.error("[api] PDF context — WO:", id, "visit:", visit?.id ?? "none", "photos:", photos.length, "company:", companyName);
     return NextResponse.json({ error: "Failed to generate report" }, { status: 500 });
   }
 

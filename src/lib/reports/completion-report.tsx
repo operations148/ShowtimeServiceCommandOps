@@ -11,7 +11,7 @@ import {
   View,
   Image,
   StyleSheet,
-  renderToBuffer,
+  pdf,
 } from "@react-pdf/renderer";
 import type { WorkOrderWithRelations } from "@/types/work-order";
 import type { Visit } from "@/types/visit";
@@ -581,6 +581,16 @@ function CompletionReportDocument({ data }: { data: ReportData }) {
 // ---------------------------------------------------------------------------
 
 export async function generateCompletionReportPdf(data: ReportData): Promise<Buffer> {
-  const buffer = await renderToBuffer(<CompletionReportDocument data={data} />);
-  return buffer as Buffer;
+  try {
+    const result = await pdf(<CompletionReportDocument data={data} />).toBuffer();
+    return result as unknown as Buffer;
+  } catch (err) {
+    // If photos caused the failure, retry without them
+    if (data.photos.length > 0) {
+      console.warn("[pdf] Initial render failed (possibly photo URLs), retrying without photos:", err);
+      const result = await pdf(<CompletionReportDocument data={{ ...data, photos: [] }} />).toBuffer();
+      return result as unknown as Buffer;
+    }
+    throw err;
+  }
 }
