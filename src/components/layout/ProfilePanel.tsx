@@ -231,13 +231,9 @@ export function ProfilePanel({ open, onClose, onAvatarUpdated, avatarOverride }:
               {removing ? "Removing…" : "Remove photo"}
             </button>
           )}
-        </div>
 
-        {/* Spacer */}
-        <div className="flex-1" />
+          <div className="my-1 border-t border-slate-100" />
 
-        {/* Footer — sign out */}
-        <div className="border-t border-slate-100 px-3 py-3">
           <button
             type="button"
             onClick={() => signOut({ callbackUrl: "/login" })}
