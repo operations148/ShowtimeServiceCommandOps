@@ -5,6 +5,50 @@ import { requirePermission, getTenantId } from '@/lib/auth/api-auth'
 import { db } from '@/lib/db/client'
 import type { TeamMember } from '@/types/team'
 
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const auth = await requirePermission('canManageSettings')
+  if (!auth.ok) return auth.response
+  const tenantId = getTenantId(auth.session)
+  const { id } = await params
+
+  // Self-protection
+  if (auth.session.user.id === id) {
+    return NextResponse.json({ error: 'You cannot delete your own account' }, { status: 400 })
+  }
+
+  const { data: existing } = await db
+    .from('users')
+    .select('id, is_active')
+    .eq('id', id)
+    .eq('tenant_id', tenantId)
+    .not('role', 'eq', 'technician')
+    .maybeSingle()
+
+  if (!existing) {
+    return NextResponse.json({ error: 'Team member not found' }, { status: 404 })
+  }
+
+  if (existing.is_active) {
+    return NextResponse.json({ error: 'Deactivate the member before deleting' }, { status: 400 })
+  }
+
+  const { error } = await db
+    .from('users')
+    .delete()
+    .eq('id', id)
+    .eq('tenant_id', tenantId)
+
+  if (error) {
+    console.error('[api] DELETE /api/team/[id] failed:', error)
+    return NextResponse.json({ error: 'Failed to delete team member' }, { status: 500 })
+  }
+
+  return NextResponse.json({ success: true })
+}
+
 const TEAM_ROLES = ['tenant_admin', 'office_staff', 'read_only_owner'] as const
 
 const PatchTeamMemberSchema = z.object({

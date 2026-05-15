@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, ChevronDown, ChevronRight, Loader2, X } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ChevronRight, Loader2, Mail, Trash2, X } from 'lucide-react'
 import { useSession } from 'next-auth/react'
 import { ASSIGNABLE_ROLES, ROLE_LABELS, type TeamMember, type TeamMemberRole } from '@/types/team'
 
@@ -29,6 +29,9 @@ export function EditTeamMemberPanel({ member, onClose, onUpdated }: Props) {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [saveError, setSaveError]     = useState<string | null>(null)
   const [deactivating, setDeactivating] = useState(false)
+  const [resending, setResending]     = useState(false)
+  const [resendSuccess, setResendSuccess] = useState(false)
+  const [deleting, setDeleting]       = useState(false)
 
   const panelRef = useRef<HTMLDivElement>(null)
 
@@ -100,6 +103,37 @@ export function EditTeamMemberPanel({ member, onClose, onUpdated }: Props) {
       setSaveError('Network error. Please try again.')
     } finally {
       setDeactivating(false)
+    }
+  }
+
+  async function handleResendInvite() {
+    setResending(true)
+    setResendSuccess(false)
+    setSaveError(null)
+    try {
+      const res = await fetch(`/api/team/${member.id}/resend-invite`, { method: 'POST' })
+      const json = await res.json() as { success?: boolean; error?: string }
+      if (res.ok) setResendSuccess(true)
+      else setSaveError(json.error ?? 'Failed to resend invite')
+    } catch {
+      setSaveError('Network error. Please try again.')
+    } finally {
+      setResending(false)
+    }
+  }
+
+  async function handleDelete() {
+    setDeleting(true)
+    setSaveError(null)
+    try {
+      const res = await fetch(`/api/team/${member.id}`, { method: 'DELETE' })
+      const json = await res.json() as { success?: boolean; error?: string }
+      if (res.ok) onClose()
+      else setSaveError(json.error ?? 'Failed to delete member')
+    } catch {
+      setSaveError('Network error. Please try again.')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -265,6 +299,37 @@ export function EditTeamMemberPanel({ member, onClose, onUpdated }: Props) {
               </div>
             )}
           </div>
+
+          {/* Resend invite — only for inactive (pending) members */}
+          {!member.is_active && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-4">
+              <p className="text-sm font-medium text-blue-900">Pending Invitation</p>
+              <p className="mt-0.5 text-xs text-blue-700">This member hasn&apos;t accepted their invite yet. Resend a fresh link to their email.</p>
+              {resendSuccess && (
+                <p className="mt-2 text-xs font-medium text-emerald-700">Invite sent! Check {member.email}</p>
+              )}
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleResendInvite}
+                  disabled={resending}
+                  className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {resending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
+                  {resending ? 'Sending…' : 'Resend Invite'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
+                >
+                  {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                  {deleting ? 'Deleting…' : 'Delete'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Danger zone */}
           {member.is_active && !isSelf && (
