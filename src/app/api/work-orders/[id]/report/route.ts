@@ -278,9 +278,8 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
   return new NextResponse(html, {
     status: 200,
     headers: {
-      "Content-Type":        "text/html; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${workOrder.wo_number}-report.html"`,
-      "Cache-Control":       "no-store",
+      "Content-Type":  "text/html; charset=utf-8",
+      "Cache-Control": "private, no-cache",
     },
   });
 }

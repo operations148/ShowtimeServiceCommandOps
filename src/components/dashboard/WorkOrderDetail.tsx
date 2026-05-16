@@ -384,16 +384,15 @@ export function WorkOrderDetail({
         const j = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
         throw new Error(j.detail ?? j.error ?? "Report generation failed");
       }
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      a.href     = url;
-      a.download = `${workOrder.wo_number}-report.html`;
-      a.target   = "_blank";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const htmlContent = await res.text();
+      if (!htmlContent || htmlContent.length < 100) {
+        throw new Error("Empty report received from server");
+      }
+      const { downloadReportAsPDF } = await import("@/lib/utils/generate-pdf");
+      await downloadReportAsPDF(
+        htmlContent,
+        `ServiceOps-${workOrder.wo_number}-Report.pdf`
+      );
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Failed to generate report", "error");
     } finally {
@@ -636,12 +635,12 @@ export function WorkOrderDetail({
               type="button"
               onClick={handleDownloadReport}
               disabled={downloadingReport}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-200 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {downloadingReport
-                ? <Loader2 className="h-4 w-4 animate-spin" />
+                ? <Loader2 className="h-4 w-4 animate-spin text-cyan-500" />
                 : <FileDown className="h-4 w-4" />}
-              {downloadingReport ? "Generating…" : "Download Report"}
+              {downloadingReport ? "Generating PDF…" : "Download Report"}
             </button>
 
           {/* Estimate button */}
