@@ -168,21 +168,23 @@ function EditButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function SaveCancelButtons({ onSave, onCancel }: { onSave: () => void; onCancel: () => void }) {
+function SaveCancelButtons({ onSave, onCancel, disabled }: { onSave: () => void; onCancel: () => void; disabled?: boolean }) {
   return (
     <div className="flex items-center gap-1.5">
       <button
         type="button"
         onClick={onSave}
-        className="flex items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+        disabled={disabled}
+        className="flex items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-60"
       >
         <Check className="h-3 w-3" />
-        Save
+        {disabled ? "Saving…" : "Save"}
       </button>
       <button
         type="button"
         onClick={onCancel}
-        className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200"
+        disabled={disabled}
+        className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200 disabled:opacity-60"
       >
         <X className="h-3 w-3" />
         Cancel
@@ -278,15 +280,39 @@ export function PropertyDetail({
     return () => clearTimeout(t);
   }, [newWOBanner]);
 
+  const [saving, setSaving] = useState(false);
+
+  async function patchProperty(patch: Record<string, unknown>) {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/properties/${prop.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const json = await res.json() as { data?: PropertyWithRelations; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Save failed");
+      if (json.data) setProp(json.data);
+      return true;
+    } catch (err) {
+      setBanner(err instanceof Error ? err.message : "Save failed");
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
   // ── Equipment edit handlers
   function startEditEquipment() {
     setEqDraft(prop.pool_equipment ?? {});
     setEditingEquipment(true);
   }
-  function saveEquipment() {
-    setProp((prev) => ({ ...prev, pool_equipment: { ...eqDraft, last_updated: new Date().toISOString() } }));
-    setEditingEquipment(false);
-    setBanner("Equipment updated (mock — not persisted)");
+  async function saveEquipment() {
+    const ok = await patchProperty({ pool_equipment: { ...eqDraft, last_updated: new Date().toISOString() } });
+    if (ok) {
+      setEditingEquipment(false);
+      setBanner("Equipment saved");
+    }
   }
   function cancelEquipment() {
     setEqDraft(prop.pool_equipment ?? {});
@@ -298,14 +324,15 @@ export function PropertyDetail({
     setAccessDraft({ gate_code: prop.gate_code ?? "", access_notes: prop.access_notes ?? "" });
     setEditingAccess(true);
   }
-  function saveAccess() {
-    setProp((prev) => ({
-      ...prev,
-      gate_code: accessDraft.gate_code || undefined,
-      access_notes: accessDraft.access_notes || undefined,
-    }));
-    setEditingAccess(false);
-    setBanner("Access information updated (mock — not persisted)");
+  async function saveAccess() {
+    const ok = await patchProperty({
+      gate_code: accessDraft.gate_code || null,
+      access_notes: accessDraft.access_notes || null,
+    });
+    if (ok) {
+      setEditingAccess(false);
+      setBanner("Access information saved");
+    }
   }
   function cancelAccess() {
     setAccessDraft({ gate_code: prop.gate_code ?? "", access_notes: prop.access_notes ?? "" });
@@ -317,10 +344,12 @@ export function PropertyDetail({
     setServiceDraft(prop.service_notes ?? "");
     setEditingService(true);
   }
-  function saveServiceNotes() {
-    setProp((prev) => ({ ...prev, service_notes: serviceDraft || undefined }));
-    setEditingService(false);
-    setBanner("Service notes updated (mock — not persisted)");
+  async function saveServiceNotes() {
+    const ok = await patchProperty({ service_notes: serviceDraft || null });
+    if (ok) {
+      setEditingService(false);
+      setBanner("Service notes saved");
+    }
   }
   function cancelServiceNotes() {
     setServiceDraft(prop.service_notes ?? "");
@@ -420,7 +449,7 @@ export function PropertyDetail({
             title="Pool Equipment"
             action={
               editingEquipment ? (
-                <SaveCancelButtons onSave={saveEquipment} onCancel={cancelEquipment} />
+                <SaveCancelButtons onSave={saveEquipment} onCancel={cancelEquipment} disabled={saving} />
               ) : (
                 <EditButton onClick={startEditEquipment} />
               )
@@ -770,7 +799,7 @@ export function PropertyDetail({
             title="Access & Entry"
             action={
               editingAccess ? (
-                <SaveCancelButtons onSave={saveAccess} onCancel={cancelAccess} />
+                <SaveCancelButtons onSave={saveAccess} onCancel={cancelAccess} disabled={saving} />
               ) : (
                 <EditButton onClick={startEditAccess} />
               )
@@ -843,7 +872,7 @@ export function PropertyDetail({
             title="Standing Service Instructions"
             action={
               editingService ? (
-                <SaveCancelButtons onSave={saveServiceNotes} onCancel={cancelServiceNotes} />
+                <SaveCancelButtons onSave={saveServiceNotes} onCancel={cancelServiceNotes} disabled={saving} />
               ) : (
                 <EditButton onClick={startEditService} />
               )
