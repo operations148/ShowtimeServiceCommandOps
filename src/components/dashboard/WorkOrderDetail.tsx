@@ -381,15 +381,18 @@ export function WorkOrderDetail({
     try {
       const res = await fetch(`/api/work-orders/${workOrder.id}/report`);
       if (!res.ok) {
-        const j = (await res.json()) as { error?: string };
-        throw new Error(j.error ?? "Download failed");
+        const j = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+        throw new Error(j.detail ?? j.error ?? "Report generation failed");
       }
       const blob = await res.blob();
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement("a");
       a.href     = url;
-      a.download = `${workOrder.wo_number}-completion-report.pdf`;
+      a.download = `${workOrder.wo_number}-report.html`;
+      a.target   = "_blank";
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Failed to generate report", "error");
