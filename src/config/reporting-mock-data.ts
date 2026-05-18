@@ -250,6 +250,5 @@ export const mockMarketingPerformance: MarketingPerformanceData = {
 // ─── Mock/Live toggle ─────────────────────────────────────────────────────────
 
 export const USE_MOCK_DATA =
-  process.env.GHL_PRIVATE_INTEGRATION_TOKEN === undefined ||
-  process.env.GHL_PRIVATE_INTEGRATION_TOKEN === '' ||
-  process.env.APP_ENV === 'development'
+  process.env.APP_ENV === 'development' ||
+  !process.env.GHL_PRIVATE_INTEGRATION_TOKEN
