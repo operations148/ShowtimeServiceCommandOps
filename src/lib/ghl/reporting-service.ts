@@ -150,16 +150,32 @@ function buildDailyTrend(
   return points
 }
 
+// ─── Resilient parallel fetch ─────────────────────────────────────────────────
+// Wraps each fetcher individually so a single endpoint failure (e.g. calendars
+// 401 due to missing scope) does not cause the entire response to fall back to
+// mock data. Failed fetchers return [] and log the specific error.
+
+async function safeFetch<T>(label: string, fn: () => Promise<T[]>): Promise<T[]> {
+  try {
+    return await fn()
+  } catch (err) {
+    console.warn(`[reporting-service] ${label} fetch failed (returning []):`, err)
+    return []
+  }
+}
+
 // ─── Owner Performance (live) ─────────────────────────────────────────────────
 
 async function fetchOwnerPerformanceLive(filters: ReportingFilters): Promise<OwnerPerformanceData> {
   const { from, to } = filters.dateRange
 
   const [contacts, opps, events] = await Promise.all([
-    fetchAllContacts(from, to),
-    fetchAllOpportunities(from, to),
-    fetchAllEvents(from, to),
+    safeFetch('contacts',     () => fetchAllContacts(from, to)),
+    safeFetch('opportunities', () => fetchAllOpportunities(from, to)),
+    safeFetch('events',        () => fetchAllEvents(from, to)),
   ])
+
+  console.log(`[reporting-service] live owner data: contacts=${contacts.length} opps=${opps.length} events=${events.length}`)
 
   const totalLeads     = contacts.length
   const wonOpps        = opps.filter(o => o.status === 'won')
@@ -258,10 +274,12 @@ async function fetchMarketingPerformanceLive(filters: ReportingFilters): Promise
   const { from, to } = filters.dateRange
 
   const [contacts, opps, events] = await Promise.all([
-    fetchAllContacts(from, to),
-    fetchAllOpportunities(from, to),
-    fetchAllEvents(from, to),
+    safeFetch('contacts',      () => fetchAllContacts(from, to)),
+    safeFetch('opportunities', () => fetchAllOpportunities(from, to)),
+    safeFetch('events',        () => fetchAllEvents(from, to)),
   ])
+
+  console.log(`[reporting-service] live marketing data: contacts=${contacts.length} opps=${opps.length} events=${events.length}`)
 
   const totalLeads    = contacts.length
   const bookedEvents  = events.filter(e => e.status !== 'cancelled' && e.status !== 'invalid')

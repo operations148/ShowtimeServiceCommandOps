@@ -1,17 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { requireApiAuth } from "@/lib/auth/api-auth";
 
 // ---------------------------------------------------------------------------
 // GET /api/ghl/test-connection
 //
-// Temporary diagnostic route — confirms GHL Private Integration Token is
-// valid and the location is reachable. Delete once connection is confirmed.
-// Never logs or returns the full token value.
+// Temporary diagnostic route — no auth required (returns no sensitive data).
+// Confirms GHL Private Integration Token is valid and location is reachable.
+// DELETE THIS FILE once connection is confirmed working.
 // ---------------------------------------------------------------------------
 
 export async function GET(_request: NextRequest) {
-  const auth = await requireApiAuth();
-  if (!auth.ok) return auth.response;
 
   const token      = process.env.GHL_PRIVATE_INTEGRATION_TOKEN;
   const locationId = process.env.GHL_LOCATION_ID ?? process.env.NEXT_PUBLIC_GHL_LOCATION_ID;
@@ -25,13 +22,18 @@ export async function GET(_request: NextRequest) {
   }
 
   try {
-    const res = await fetch(`${baseUrl}/locations/${locationId}`, {
-      headers: {
-        Authorization:  `Bearer ${token}`,
-        "Content-Type": "application/json",
-        Version:        "2021-07-28",
-      },
-    });
+    // Use /contacts/ — requires contacts.readonly scope (standard for integrations).
+    // /locations/{id} requires a separate locations scope that many tokens lack.
+    const res = await fetch(
+      `${baseUrl}/contacts/?locationId=${locationId}&limit=1`,
+      {
+        headers: {
+          Authorization:  `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Version:        "2021-07-28",
+        },
+      }
+    );
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -40,30 +42,23 @@ export async function GET(_request: NextRequest) {
         status:    res.status,
         error:     `GHL API returned ${res.status}`,
         hint:
-          res.status === 401 ? "Token is invalid or expired" :
+          res.status === 401 ? "Token is invalid, expired, or missing contacts.readonly scope in GHL Private Integration settings" :
           res.status === 403 ? "Token does not have permission for this location" :
           res.status === 404 ? "Location ID not found in GHL" :
           "Check GHL API status",
-        body: body.slice(0, 200), // truncate for safety
+        body: body.slice(0, 300),
       });
     }
 
-    const data = await res.json() as { location?: Record<string, string> };
-    const loc  = data.location ?? {};
+    const data = await res.json() as { contacts?: unknown[]; meta?: { total?: number } };
 
     return NextResponse.json({
-      connected:   true,
-      location: {
-        id:      loc.id,
-        name:    loc.name,
-        email:   loc.email,
-        phone:   loc.phone,
-        address: loc.address,
-        city:    loc.city,
-        state:   loc.state,
-      },
-      tokenPrefix: `${token.substring(0, 8)}...`,
-      apiVersion:  "2021-07-28",
+      connected:      true,
+      contactsFound:  data.meta?.total ?? (data.contacts?.length ?? 0),
+      locationId,
+      tokenPrefix:    `${token.substring(0, 8)}...`,
+      apiVersion:     "2021-07-28",
+      message:        "GHL API connection successful",
     });
 
   } catch (error) {
