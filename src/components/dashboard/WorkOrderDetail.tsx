@@ -301,7 +301,11 @@ export function WorkOrderDetail({
   );
   // Toast: { type: "success"|"error"; message: string }
   const [toast, setToast]           = useState<{ type: "success" | "error"; message: string } | null>(null);
-  const [savingStatus, setSavingStatus] = useState(false);
+  const [savingStatus, setSavingStatus]     = useState(false);
+  const [priority, setPriority]             = useState<Priority>(workOrder.priority);
+  const [savingPriority, setSavingPriority] = useState(false);
+  const [scheduledDate, setScheduledDate]   = useState<string>(workOrder.scheduled_date ?? "");
+  const [savingDate, setSavingDate]         = useState(false);
   const [ghlSyncFailed, setGhlSyncFailed] = useState<boolean>(workOrder.ghl_sync_failed ?? false);
   const [retrying, setRetrying]     = useState(false);
   const [downloadingReport, setDownloadingReport] = useState(false);
@@ -519,6 +523,52 @@ export function WorkOrderDetail({
     }
   }, [workOrder.id, loadHistory]);
 
+  const applyPriorityChange = useCallback(async (newPriority: Priority) => {
+    if (newPriority === priority) return;
+    setSavingPriority(true);
+    try {
+      const res = await fetch(`/api/work-orders/${workOrder.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priority: newPriority }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        showToast(json.error ?? "Failed to update priority", "error");
+        return;
+      }
+      setPriority(newPriority);
+      showToast(`Priority set to ${PRIORITY_CONFIG[newPriority].label}`);
+    } catch {
+      showToast("Network error — priority not saved", "error");
+    } finally {
+      setSavingPriority(false);
+    }
+  }, [workOrder.id, priority]);
+
+  const applyScheduledDate = useCallback(async (newDate: string) => {
+    if (newDate === (workOrder.scheduled_date ?? "")) return;
+    setSavingDate(true);
+    try {
+      const res = await fetch(`/api/work-orders/${workOrder.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scheduled_date: newDate || "" }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        showToast(json.error ?? "Failed to save date", "error");
+        return;
+      }
+      setScheduledDate(newDate);
+      showToast(newDate ? "Scheduled date saved" : "Scheduled date cleared");
+    } catch {
+      showToast("Network error — date not saved", "error");
+    } finally {
+      setSavingDate(false);
+    }
+  }, [workOrder.id, workOrder.scheduled_date]);
+
   // Estimate needed dialog submit
   const handleFlagEstimate = useCallback(async () => {
     if (!estimateNotes.trim()) return;
@@ -552,7 +602,7 @@ export function WorkOrderDetail({
   }, [workOrder.id, estimateNotes, loadHistory]);
 
   const statusCfg = STATUS_CONFIG[status];
-  const priorityCfg = PRIORITY_CONFIG[workOrder.priority];
+  const priorityCfg = PRIORITY_CONFIG[priority];
 
   return (
     <div className="mx-auto max-w-7xl space-y-5">
@@ -623,9 +673,19 @@ export function WorkOrderDetail({
               <span className={cn("inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium", statusCfg.className)}>
                 {statusCfg.label}
               </span>
-              <span className={cn("inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium", priorityCfg.className)}>
-                {priorityCfg.label}
-              </span>
+              <select
+                value={priority}
+                disabled={savingPriority}
+                onChange={(e) => void applyPriorityChange(e.target.value as Priority)}
+                className={cn(
+                  "cursor-pointer rounded-full border-0 px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ring-transparent transition-all hover:ring-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-400 disabled:opacity-60",
+                  priorityCfg.className
+                )}
+              >
+                {Object.values(Priority).map((p) => (
+                  <option key={p} value={p}>{PRIORITY_CONFIG[p].label}</option>
+                ))}
+              </select>
             </div>
             <h2 className="mt-1 font-display text-2xl font-bold text-slate-900">
               {workOrder.title}
@@ -1189,14 +1249,27 @@ export function WorkOrderDetail({
           <SectionCard title="Schedule">
             <dl className="space-y-4">
               <Field label="Scheduled Date">
-                {workOrder.scheduled_date ? (
-                  <span className="flex items-center gap-1.5">
-                    <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
-                    {formatDate(workOrder.scheduled_date)}
-                  </span>
-                ) : (
-                  <span className="text-slate-400">Not scheduled</span>
-                )}
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={scheduledDate}
+                    disabled={savingDate}
+                    onChange={(e) => setScheduledDate(e.target.value)}
+                    onBlur={(e) => void applyScheduledDate(e.target.value)}
+                    className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-sm text-slate-700 shadow-sm transition focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:opacity-60"
+                  />
+                  {savingDate && <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />}
+                  {!savingDate && scheduledDate && (
+                    <button
+                      type="button"
+                      onClick={() => void applyScheduledDate("")}
+                      className="text-slate-400 hover:text-slate-600"
+                      title="Clear date"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               </Field>
 
               {(workOrder.scheduled_time_start || workOrder.scheduled_time_end) && (
