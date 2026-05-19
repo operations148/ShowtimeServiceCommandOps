@@ -37,6 +37,7 @@ const STATUS_LABEL: Record<string, string> = {
   new: "New",
   assigned: "Assigned",
   in_progress: "In Progress",
+  estimate_needed: "Estimate Needed",
   needs_follow_up: "Follow Up",
 };
 
@@ -44,6 +45,7 @@ const STATUS_COLOR: Record<string, string> = {
   new: "bg-slate-100 text-slate-700",
   assigned: "bg-cyan-50 text-cyan-700",
   in_progress: "bg-amber-50 text-amber-700",
+  estimate_needed: "bg-yellow-50 text-yellow-700",
   needs_follow_up: "bg-orange-50 text-orange-700",
 };
 
@@ -72,25 +74,19 @@ export function EditTechnicianPanel({ tech, onClose, onUpdated }: Props) {
 
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Fetch active jobs
+  // Fetch active jobs (all non-terminal statuses)
   useEffect(() => {
     async function load() {
       setLoadingJobs(true);
       try {
-        const res = await fetch(
-          `/api/work-orders?technician_id=${tech.id}&status=new`,
-          { cache: "no-store" }
-        );
-        const res2 = await fetch(
-          `/api/work-orders?technician_id=${tech.id}&status=assigned`,
-          { cache: "no-store" }
-        );
-        const res3 = await fetch(
-          `/api/work-orders?technician_id=${tech.id}&status=in_progress`,
-          { cache: "no-store" }
-        );
-        const [d1, d2, d3] = await Promise.all([res.json(), res2.json(), res3.json()]);
-        const all = [...(d1.data ?? []), ...(d2.data ?? []), ...(d3.data ?? [])];
+        const statuses = ['new', 'assigned', 'in_progress', 'estimate_needed', 'needs_follow_up']
+        const responses = await Promise.all(
+          statuses.map(s =>
+            fetch(`/api/work-orders?technician_id=${tech.id}&status=${s}`, { cache: 'no-store' })
+              .then(r => r.json())
+          )
+        )
+        const all = responses.flatMap(d => d.data ?? [])
         setJobs(all.slice(0, 5));
       } catch {
         // silent
