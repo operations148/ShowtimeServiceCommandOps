@@ -238,7 +238,7 @@ export async function createWorkOrder(
 export async function createWorkOrderFull(
   input: {
     tenant_id: string;
-    property_id: string;
+    property_id: string | null;
     ghl_contact_id?: string;
     ghl_opportunity_id?: string;
     ghl_trigger_stage?: string;
@@ -452,7 +452,7 @@ export async function deleteWorkOrder(
   let query = db.from("work_orders").delete().eq("id", id);
   if (tenantId) query = query.eq("tenant_id", tenantId);
 
-  const { error, count } = await query;
+  const { error } = await query;
   if (error) throw new Error(`[db] deleteWorkOrder: ${error.message}`);
-  return (count ?? 0) > 0;
+  return true;
 }
