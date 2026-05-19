@@ -92,23 +92,38 @@ export async function createWorkOrderFromGHLStage(
     return { outcome: "already_exists", workOrder: existing };
   }
 
-  // ── Property lookup ─────────────────────────────────────────────────────────
+  // ── Property lookup (optional) ──────────────────────────────────────────────
+  // property_id is nullable — create the WO even if no property exists yet.
+  // The operator can link a property later via the inline picker on the WO detail page.
   const property = await findPropertyByGhlContactId(contactId, tenantId);
   if (!property) {
     console.warn(
       `${tag} No Property for ghl_contact_id="${contactId}". ` +
-      `ContactCreate webhook may still be in-flight. Skipping.`
+      `Creating WO with property_id=null — link property manually after ContactCreate syncs.`
     );
-    return { outcome: "skipped", reason: `No property for ghl_contact_id: ${contactId}` };
   }
 
   // ── Build title and description ─────────────────────────────────────────────
   const isDiagnosis =
     stageName.toLowerCase() === GHL_PIPELINE_STAGES.DIAGNOSIS_BOOKED.toLowerCase();
 
+  // Fall back to contact name from payload when no property record exists yet.
+  // Use || not ?? so empty strings also fall through to the next option.
+  // The webhook normalizer stamps contact.name from multiple key variants before
+  // this factory runs, so payload.contact?.name should already be populated.
+  // Direct flat-payload keys are checked as final fallbacks.
+  const raw = payload as unknown as Record<string, string>;
+  const customerName =
+    property?.customer_name ||
+    payload.contact?.name ||
+    raw.name ||
+    raw.contactName ||
+    raw.fullName ||
+    "New Lead";
+
   const title = isDiagnosis
-    ? `Diagnosis — ${property.customer_name}`
-    : `Approved Job — ${property.customer_name}`;
+    ? `Diagnosis — ${customerName}`
+    : `Approved Job — ${customerName}`;
 
   const description = isDiagnosis
     ? "Initial pool diagnosis and assessment"
@@ -125,38 +140,40 @@ export async function createWorkOrderFromGHLStage(
   const rawDate = extractOppCustomField(payload.customFields, "GHL_CF_OPP_SCHEDULED_DATE");
   const scheduledDate = parseGhlDate(rawDate);
 
-  const propertyAddress = [
-    property.address_line1,
-    property.address_line2,
-    `${property.city}, ${property.state} ${property.zip}`,
-  ]
-    .filter(Boolean)
-    .join(", ");
+  const propertyAddress = property
+    ? [
+        property.address_line1,
+        property.address_line2,
+        `${property.city}, ${property.state} ${property.zip}`,
+      ]
+        .filter(Boolean)
+        .join(", ")
+    : "";
 
   // ── Create ──────────────────────────────────────────────────────────────────
   const workOrder = await createWorkOrderFull(
     {
-      tenant_id:              tenantId,
-      property_id:            property.id,
-      ghl_contact_id:         contactId,
-      ghl_opportunity_id:     payload.id,
-      ghl_trigger_stage:      stageName,
+      tenant_id:               tenantId,
+      property_id:             property?.id ?? null,
+      ghl_contact_id:          contactId,
+      ghl_opportunity_id:      payload.id,
+      ghl_trigger_stage:       stageName,
       title,
       description,
-      status:                 WorkOrderStatus.NEW,
+      status:                  WorkOrderStatus.NEW,
       priority,
-      service_category:       serviceCategory,
-      assigned_technician_id: techId,
-      scheduled_date:         scheduledDate,
+      service_category:        serviceCategory,
+      assigned_technician_id:  techId,
+      scheduled_date:          scheduledDate,
       estimate_handoff_status: EstimateHandoffStatus.NOT_NEEDED,
     },
     propertyAddress,
-    property.customer_name
+    customerName
   );
 
   console.log(
     `${tag} Created WO ${workOrder.wo_number} ` +
-    `category="${workOrder.service_category}" property="${property.customer_name}"`
+    `category="${workOrder.service_category}" customer="${customerName}" propertyLinked=${!!property}`
   );
 
   return { outcome: "created", workOrder };
