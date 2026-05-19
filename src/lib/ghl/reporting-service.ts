@@ -39,7 +39,10 @@ async function ghlGet<T = unknown>(path: string): Promise<T> {
     },
     next: { revalidate: 300 },
   })
-  if (!res.ok) throw new Error(`GHL API ${res.status}: ${path}`)
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`GHL API ${res.status}: ${path} — ${body.slice(0, 200)}`)
+  }
   return res.json() as Promise<T>
 }
 
@@ -76,9 +79,11 @@ async function fetchAllContacts(from: string, to: string): Promise<GHLContact[]>
   const startDate = new Date(from + 'T00:00:00Z').getTime()
   const endDate   = new Date(to   + 'T23:59:59Z').getTime()
 
-  for (let page = 0; page < 20; page++) {
+  // GHL doesn't sort contacts by date, so we must paginate all and filter client-side.
+  // Cap at 50 pages (5,000 contacts) to avoid runaway loops on large accounts.
+  for (let page = 0; page < 50; page++) {
     const cursor = startAfterId ? `&startAfterId=${startAfterId}` : ''
-    const data = await ghlGet<{ contacts: GHLContact[]; meta?: { nextPageUrl?: string } }>(
+    const data = await ghlGet<{ contacts: GHLContact[]; meta?: { nextPageUrl?: string; total?: number } }>(
       `/contacts/?locationId=${GHL_LOCATION}&limit=100${cursor}`
     )
     const batch = data.contacts ?? []
@@ -89,9 +94,6 @@ async function fetchAllContacts(from: string, to: string): Promise<GHLContact[]>
       if (ts >= startDate && ts <= endDate) contacts.push(c)
     }
 
-    // Stop if the oldest contact in this batch is before our start date
-    const oldest = batch[batch.length - 1]
-    if (oldest && new Date(oldest.dateAdded).getTime() < startDate) break
     if (!data.meta?.nextPageUrl) break
     startAfterId = batch[batch.length - 1]?.id ?? ''
   }
@@ -101,18 +103,25 @@ async function fetchAllContacts(from: string, to: string): Promise<GHLContact[]>
 async function fetchAllOpportunities(from: string, to: string): Promise<GHLOpportunity[]> {
   if (!GHL_LOCATION) return []
   const opps: GHLOpportunity[] = []
-  let startAfterId = ''
+  const startDate = new Date(from + 'T00:00:00Z').getTime()
+  const endDate   = new Date(to   + 'T23:59:59Z').getTime()
+  let page = 1
 
-  for (let page = 0; page < 20; page++) {
-    const cursor = startAfterId ? `&startAfterId=${startAfterId}` : ''
-    const data = await ghlGet<{ opportunities: GHLOpportunity[]; meta?: { nextPageUrl?: string } }>(
-      `/opportunities/search?location_id=${GHL_LOCATION}&date=${from}&endDate=${to}&limit=100${cursor}`
+  // GHL opportunities search uses startDate/endDate (not date/endDate)
+  // and requires explicit status=all to include won/lost, not just open.
+  for (let i = 0; i < 20; i++) {
+    const data = await ghlGet<{ opportunities: GHLOpportunity[]; meta?: { total?: number; currentPage?: number; nextPage?: number } }>(
+      `/opportunities/search?location_id=${GHL_LOCATION}&startDate=${from}&endDate=${to}&status=all&limit=100&page=${page}`
     )
     const batch = data.opportunities ?? []
     if (batch.length === 0) break
-    opps.push(...batch)
-    if (!data.meta?.nextPageUrl) break
-    startAfterId = batch[batch.length - 1]?.id ?? ''
+    // Filter by createdAt within range (belt-and-suspenders)
+    for (const o of batch) {
+      const ts = new Date(o.createdAt).getTime()
+      if (ts >= startDate && ts <= endDate) opps.push(o)
+    }
+    if (!data.meta?.nextPage) break
+    page++
   }
   return opps
 }
@@ -121,10 +130,12 @@ async function fetchAllEvents(from: string, to: string): Promise<GHLEvent[]> {
   if (!GHL_LOCATION) return []
   const startTime = encodeURIComponent(new Date(from + 'T00:00:00Z').toISOString())
   const endTime   = encodeURIComponent(new Date(to   + 'T23:59:59Z').toISOString())
-  const data = await ghlGet<{ events: GHLEvent[] }>(
-    `/calendars/events?locationId=${GHL_LOCATION}&startTime=${startTime}&endTime=${endTime}&eventType=Appointment`
+  // Note: eventType filter removed — not supported in all GHL API versions
+  const data = await ghlGet<{ events: GHLEvent[]; appointments?: GHLEvent[] }>(
+    `/calendars/events?locationId=${GHL_LOCATION}&startTime=${startTime}&endTime=${endTime}`
   )
-  return data.events ?? []
+  // GHL may return events under 'events' or 'appointments' key
+  return data.events ?? data.appointments ?? []
 }
 
 // ─── Trend builder ────────────────────────────────────────────────────────────
