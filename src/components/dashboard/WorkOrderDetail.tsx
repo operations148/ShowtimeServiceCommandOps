@@ -26,6 +26,8 @@ import {
   Link2Off,
   FileDown,
   ArrowRightLeft,
+  Mail,
+  Send,
 } from "lucide-react";
 import type { StatusHistoryEntry } from "@/app/api/work-orders/[id]/history/route";
 import {
@@ -315,6 +317,13 @@ export function WorkOrderDetail({
   const [estimateNotes, setEstimateNotes]           = useState("");
   const [savingEstimate, setSavingEstimate]         = useState(false);
 
+  // Send estimate email modal
+  const [emailModalOpen,   setEmailModalOpen]   = useState(false);
+  const [emailRecipient,   setEmailRecipient]   = useState("");
+  const [emailNotes,       setEmailNotes]       = useState("");
+  const [sendingEmail,     setSendingEmail]     = useState(false);
+  const [emailSentAt,      setEmailSentAt]      = useState<string | null>(null);
+
   // Status history
   const [history, setHistory]           = useState<StatusHistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -601,6 +610,37 @@ export function WorkOrderDetail({
     }
   }, [workOrder.id, estimateNotes, loadHistory]);
 
+  const openEmailModal = useCallback(() => {
+    setEmailNotes((workOrder as unknown as Record<string, unknown>).estimate_notes as string ?? "");
+    setEmailRecipient("");
+    setEmailModalOpen(true);
+  }, [workOrder]);
+
+  const handleSendEstimateEmail = useCallback(async () => {
+    if (!emailRecipient.trim()) return;
+    setSendingEmail(true);
+    try {
+      const res = await fetch(`/api/work-orders/${workOrder.id}/send-estimate`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ recipientEmail: emailRecipient.trim(), estimateNotes: emailNotes }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        showToast(json.error ?? "Failed to send email", "error");
+        return;
+      }
+      setEmailSentAt(new Date().toISOString());
+      setEmailModalOpen(false);
+      showToast("Estimate notification sent ✅");
+      void loadHistory();
+    } catch {
+      showToast("Network error — email not sent", "error");
+    } finally {
+      setSendingEmail(false);
+    }
+  }, [workOrder.id, emailRecipient, emailNotes, loadHistory]);
+
   const statusCfg = STATUS_CONFIG[status];
   const priorityCfg = PRIORITY_CONFIG[priority];
 
@@ -803,6 +843,99 @@ export function WorkOrderDetail({
               >
                 {savingEstimate && <Loader2 className="h-4 w-4 animate-spin" />}
                 Flag Estimate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Send Estimate Email Modal */}
+      {emailModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => { if (!sendingEmail) setEmailModalOpen(false); }}
+          />
+          <div className="relative w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cyan-100">
+                <Mail className="h-5 w-5 text-cyan-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">Send Estimate Notification</h3>
+                <p className="mt-0.5 text-sm text-slate-500">
+                  Send the full job details and property info to your estimator.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEmailModalOpen(false)}
+                disabled={sendingEmail}
+                className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:opacity-50"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Recipient Email <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="email"
+                  value={emailRecipient}
+                  onChange={(e) => setEmailRecipient(e.target.value)}
+                  placeholder="estimator@yourcompany.com"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Estimate Notes
+                </label>
+                <textarea
+                  value={emailNotes}
+                  onChange={(e) => setEmailNotes(e.target.value)}
+                  placeholder="What needs to be quoted…"
+                  rows={4}
+                  className="w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
+                />
+              </div>
+
+              <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-500">
+                <p className="font-semibold text-slate-600 mb-1">Email will include:</p>
+                <ul className="space-y-0.5 list-disc list-inside">
+                  <li>Work order summary and service type</li>
+                  <li>Property address and access notes</li>
+                  <li>Gate / access code (if on file)</li>
+                  <li>Pool equipment on file</li>
+                  <li>Technician notes from latest visit</li>
+                  <li>Direct link to the work order</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setEmailModalOpen(false)}
+                disabled={sendingEmail}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSendEstimateEmail()}
+                disabled={sendingEmail || !emailRecipient.trim()}
+                className="flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-cyan-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {sendingEmail
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <Send className="h-4 w-4" />}
+                {sendingEmail ? "Sending…" : "Send Notification"}
               </button>
             </div>
           </div>
@@ -1032,28 +1165,45 @@ export function WorkOrderDetail({
                   </div>
                 </div>
 
-                {estimateHandoff === EstimateHandoffStatus.FLAGGED && (
-                  <button
-                    type="button"
-                    className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-500 px-3.5 py-2 text-sm font-semibold text-white hover:bg-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
-                    onClick={async () => {
-                      const res = await fetch(`/api/work-orders/${workOrder.id}`, {
-                        method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ estimate_handoff_status: EstimateHandoffStatus.SENT_TO_GHL }),
-                      });
-                      if (res.ok) {
-                        setEstimateHandoff(EstimateHandoffStatus.SENT_TO_GHL);
-                        showToast("Estimate sent to GHL");
-                      } else {
-                        showToast("Failed to update GHL status", "error");
-                      }
-                    }}
-                  >
-                    <ExternalLink className="h-4 w-4" />
-                    Send to GHL
-                  </button>
-                )}
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  {estimateHandoff === EstimateHandoffStatus.FLAGGED && (
+                    <button
+                      type="button"
+                      className="flex items-center gap-1.5 rounded-lg bg-brand-500 px-3.5 py-2 text-sm font-semibold text-white hover:bg-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+                      onClick={async () => {
+                        const res = await fetch(`/api/work-orders/${workOrder.id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ estimate_handoff_status: EstimateHandoffStatus.SENT_TO_GHL }),
+                        });
+                        if (res.ok) {
+                          setEstimateHandoff(EstimateHandoffStatus.SENT_TO_GHL);
+                          showToast("Estimate sent to GHL");
+                        } else {
+                          showToast("Failed to update GHL status", "error");
+                        }
+                      }}
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Send to GHL
+                    </button>
+                  )}
+                  {emailSentAt ? (
+                    <span className="flex items-center gap-1.5 rounded-lg border border-cyan-200 bg-cyan-50 px-3.5 py-2 text-sm font-medium text-cyan-700">
+                      <Mail className="h-4 w-4" />
+                      Email sent {new Date(emailSentAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={openEmailModal}
+                      className="flex items-center gap-1.5 rounded-lg border border-cyan-400 px-3.5 py-2 text-sm font-medium text-cyan-600 transition-colors hover:bg-cyan-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                    >
+                      <Mail className="h-4 w-4" />
+                      Send Estimate Email
+                    </button>
+                  )}
+                </div>
               </div>
             </SectionCard>
           )}
