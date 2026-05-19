@@ -76,25 +76,17 @@ async function fetchAllContacts(from: string, to: string): Promise<GHLContact[]>
   if (!GHL_LOCATION) return []
   const contacts: GHLContact[] = []
   let startAfterId = ''
-  const startDate = new Date(from + 'T00:00:00Z').getTime()
-  const endDate   = new Date(to   + 'T23:59:59Z').getTime()
 
-  // GHL doesn't sort contacts by date, so we must paginate all and filter client-side.
-  // Cap at 50 pages (5,000 contacts) to avoid runaway loops on large accounts.
-  for (let page = 0; page < 50; page++) {
+  // Use GHL's built-in date range filter so we only fetch contacts in range
+  // and paginate until nextPageUrl is absent — no artificial cap needed.
+  while (true) {
     const cursor = startAfterId ? `&startAfterId=${startAfterId}` : ''
     const data = await ghlGet<{ contacts: GHLContact[]; meta?: { nextPageUrl?: string; total?: number } }>(
-      `/contacts/?locationId=${GHL_LOCATION}&limit=100${cursor}`
+      `/contacts/?locationId=${GHL_LOCATION}&startDate=${from}&endDate=${to}&limit=100${cursor}`
     )
     const batch = data.contacts ?? []
-    if (batch.length === 0) break
-
-    for (const c of batch) {
-      const ts = new Date(c.dateAdded).getTime()
-      if (ts >= startDate && ts <= endDate) contacts.push(c)
-    }
-
-    if (!data.meta?.nextPageUrl) break
+    contacts.push(...batch)
+    if (batch.length === 0 || !data.meta?.nextPageUrl) break
     startAfterId = batch[batch.length - 1]?.id ?? ''
   }
   return contacts
