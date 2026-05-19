@@ -182,8 +182,9 @@ export function buildEstimateEmailText(data: EstimateEmailData): string {
     .trim()
 }
 
-function escHtml(str: string): string {
-  return str
+function escHtml(str: string | null | undefined): string {
+  if (str == null) return ''
+  return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
