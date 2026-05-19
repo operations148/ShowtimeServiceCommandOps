@@ -224,6 +224,8 @@ function JobCard({ job }: { job: WorkOrderWithRelations }) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+const TERMINAL = new Set([WorkOrderStatus.COMPLETED, WorkOrderStatus.CANCELLED]);
+
 export default async function TechTodayPage() {
   const session = await getServerSession(authOptions);
   const tenantId = session?.user.tenant_id ?? "tenant-showtime";
@@ -235,21 +237,51 @@ export default async function TechTodayPage() {
     technician_id: technicianId,
   });
 
-  const todayJobs = allWos
-    .filter((wo) => wo.scheduled_date === today)
+  const activeWos = allWos.filter((wo) => !TERMINAL.has(wo.status));
+
+  const overdueJobs = activeWos
+    .filter((wo) => wo.scheduled_date && wo.scheduled_date < today)
+    .sort((a, b) => (a.scheduled_date ?? "").localeCompare(b.scheduled_date ?? ""));
+
+  const todayJobs = activeWos
+    .filter((wo) => wo.scheduled_date === today || !wo.scheduled_date)
     .sort((a, b) =>
       (a.scheduled_time_start ?? "99:99").localeCompare(b.scheduled_time_start ?? "99:99")
     );
 
+  const allVisible = [...overdueJobs, ...todayJobs];
+
   return (
     <div className="flex flex-col">
-      <DateHeader jobs={todayJobs} />
+      <DateHeader jobs={allVisible} />
 
       <div className="space-y-3 px-4 pb-8 pt-4">
-        {todayJobs.length === 0 ? (
+        {overdueJobs.length > 0 && (
+          <>
+            <div className="flex items-center gap-2 px-1 pt-1">
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-amber-600">
+                Overdue — {overdueJobs.length} job{overdueJobs.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+            {overdueJobs.map((job) => <JobCard key={job.id} job={job} />)}
+            <div className="flex items-center gap-3 px-2 pt-1">
+              <div className="h-px flex-1 bg-slate-200" />
+              <span className="text-xs font-medium text-slate-400">Today</span>
+              <div className="h-px flex-1 bg-slate-200" />
+            </div>
+          </>
+        )}
+
+        {todayJobs.length === 0 && overdueJobs.length === 0 ? (
           <div className="flex flex-col items-center gap-3 py-16 text-center">
             <CheckCircle2 className="h-10 w-10 text-emerald-300" />
             <p className="text-sm font-medium text-slate-500">No jobs scheduled for today</p>
+          </div>
+        ) : todayJobs.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 py-8 text-center">
+            <CheckCircle2 className="h-8 w-8 text-emerald-300" />
+            <p className="text-sm font-medium text-slate-500">Nothing else scheduled today</p>
           </div>
         ) : (
           todayJobs.map((job) => <JobCard key={job.id} job={job} />)
