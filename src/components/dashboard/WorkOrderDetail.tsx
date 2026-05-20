@@ -28,6 +28,7 @@ import {
   ArrowRightLeft,
   Mail,
   Send,
+  MessageSquare,
 } from "lucide-react";
 import type { StatusHistoryEntry } from "@/app/api/work-orders/[id]/history/route";
 import {
@@ -301,6 +302,16 @@ export function WorkOrderDetail({
   const [estimateHandoff, setEstimateHandoff] = useState<EstimateHandoffStatus>(
     workOrder.estimate_handoff_status
   );
+  // Tech completion notes — populated when tech marks job done
+  const [techCompletionMessage, setTechCompletionMessage] = useState<string | null>(
+    (workOrder as WorkOrderWithRelations & { tech_completion_message?: string | null }).tech_completion_message ?? null
+  );
+  const [techCompletedBy, setTechCompletedBy] = useState<string | null>(
+    (workOrder as WorkOrderWithRelations & { tech_completed_by?: string | null }).tech_completed_by ?? null
+  );
+  const [techCompletedAt, setTechCompletedAt] = useState<string | null>(
+    (workOrder as WorkOrderWithRelations & { tech_completed_at?: string | null }).tech_completed_at ?? null
+  );
   // Toast: { type: "success"|"error"; message: string }
   const [toast, setToast]           = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [savingStatus, setSavingStatus]     = useState(false);
@@ -362,6 +373,44 @@ export function WorkOrderDetail({
   }, [workOrder.id]);
 
   useEffect(() => { void loadHistory(); }, [loadHistory]);
+
+  // Poll every 30 seconds when work order is not yet in a terminal state —
+  // picks up tech completion message shortly after the technician marks the job done.
+  useEffect(() => {
+    const TERMINAL = new Set([WorkOrderStatus.COMPLETED, WorkOrderStatus.CANCELLED]);
+    if (TERMINAL.has(status)) return;
+
+    const intervalId = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/work-orders/${workOrder.id}`);
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          data?: WorkOrderWithRelations & {
+            tech_completion_message?: string | null;
+            tech_completed_by?: string | null;
+            tech_completed_at?: string | null;
+          };
+        };
+        const fresh = json.data;
+        if (!fresh) return;
+
+        if (fresh.status === WorkOrderStatus.COMPLETED && fresh.status !== status) {
+          setStatus(WorkOrderStatus.COMPLETED);
+          if (fresh.tech_completion_message) {
+            setTechCompletionMessage(fresh.tech_completion_message);
+            setTechCompletedBy(fresh.tech_completed_by ?? null);
+            setTechCompletedAt(fresh.tech_completed_at ?? null);
+          }
+          showToast("Job marked complete by technician ✅");
+          void loadHistory();
+        }
+      } catch {
+        // Non-fatal — polling is best effort
+      }
+    }, 30_000);
+
+    return () => clearInterval(intervalId);
+  }, [workOrder.id, status, loadHistory]);
 
   function showToast(msg: string, type: "success" | "error" = "success") {
     setToast({ type, message: msg });
@@ -1216,6 +1265,32 @@ export function WorkOrderDetail({
             />
           )}
 
+          {/* Technician Completion Notes */}
+          {techCompletionMessage && (
+            <SectionCard title="Technician Completion Notes">
+              <div className="flex items-start gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100">
+                  <MessageSquare className="h-4 w-4 text-emerald-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    {techCompletedBy && (
+                      <span className="text-sm font-semibold text-slate-800">{techCompletedBy}</span>
+                    )}
+                    {techCompletedAt && (
+                      <span className="text-xs text-slate-400">{formatDateTime(techCompletedAt)}</span>
+                    )}
+                  </div>
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+                    <p className="text-sm leading-relaxed text-emerald-900 whitespace-pre-wrap">
+                      {techCompletionMessage}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </SectionCard>
+          )}
+
           {/* Status History */}
           <SectionCard title="Status History">
             {historyLoading ? (
@@ -1397,6 +1472,18 @@ export function WorkOrderDetail({
 
           {/* Schedule */}
           <SectionCard title="Schedule">
+            {!workOrder.scheduled_date &&
+              workOrder.status !== "completed" &&
+              workOrder.status !== "cancelled" && (
+                <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <span className="mt-0.5 shrink-0">⚠</span>
+                  <span>
+                    No appointment date was captured from the GHL webhook. Set the date
+                    below or check the GHL workflow body includes{" "}
+                    <code className="rounded bg-amber-100 px-1">appointmentStartDateTime</code>.
+                  </span>
+                </div>
+              )}
             <dl className="space-y-4">
               <Field label="Scheduled Date">
                 <div className="flex items-center gap-2">

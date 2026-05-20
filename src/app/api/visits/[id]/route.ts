@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { PatchVisitSchema } from "@/lib/validation/visit";
 import { getVisitById, updateVisit } from "@/lib/db/queries/visits";
+import { VisitStatus } from "@/types/visit";
 import { WorkOrderStatus, EstimateHandoffStatus } from "@/types/work-order";
 import { updateWorkOrder } from "@/lib/db/queries/work-orders";
 import { createEstimateHandoff } from "@/lib/db/queries/estimate-handoffs";
@@ -120,6 +121,25 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     }).catch((err) => console.error("[visits/PATCH] createEstimateHandoff failed:", err));
     // Sync to GHL (fire-and-forget)
     void syncEstimateToGhl(updatedVisit);
+  }
+
+  // Detect completion: visit status → COMPLETED with a completion_message.
+  const completedNow =
+    existingVisit.status !== VisitStatus.COMPLETED &&
+    updatedVisit.status  === VisitStatus.COMPLETED &&
+    updatedVisit.completion_message != null;
+
+  if (completedNow) {
+    void updateWorkOrder(
+      updatedVisit.work_order_id,
+      {
+        status:                  WorkOrderStatus.COMPLETED,
+        tech_completion_message: updatedVisit.completion_message ?? undefined,
+        tech_completed_by:       updatedVisit.completed_by_name ?? undefined,
+        tech_completed_at:       updatedVisit.completed_at ?? new Date().toISOString(),
+      },
+      tenantId
+    ).catch((err) => console.error("[visits/PATCH] updateWorkOrder completion failed:", err));
   }
 
   return NextResponse.json({ data: updatedVisit });

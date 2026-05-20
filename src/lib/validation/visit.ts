@@ -43,11 +43,13 @@ export type CreateVisitInput = z.infer<typeof CreateVisitSchema>;
 // ---------------------------------------------------------------------------
 
 export const PatchVisitSchema = z.object({
-  status:           z.nativeEnum(VisitStatus).optional(),
-  checklist:        z.array(ChecklistItemSchema).optional(),
-  technician_notes: z.string().max(5000).optional(),
-  estimate_flagged: z.boolean().optional(),
-  completed_at:     z.string().optional(),
+  status:             z.nativeEnum(VisitStatus).optional(),
+  checklist:          z.array(ChecklistItemSchema).optional(),
+  technician_notes:   z.string().max(5000).optional(),
+  estimate_flagged:   z.boolean().optional(),
+  completed_at:       z.string().optional(),
+  completion_message: z.string().max(500).optional(),
+  completed_by_name:  z.string().max(200).optional(),
 });
 
 export type PatchVisitInput = z.infer<typeof PatchVisitSchema>;

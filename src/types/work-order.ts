@@ -66,6 +66,10 @@ export interface WorkOrder {
   recurring_schedule_id?: string;
   /** GHL pipeline stage name that triggered this work order's creation (e.g. "Diagnosis Booked"). */
   ghl_trigger_stage?: string;
+  /** Final completion notes written by the technician when marking the job done. */
+  tech_completion_message?: string | null;
+  tech_completed_by?: string | null;
+  tech_completed_at?: string | null;
   created_at: string;
   updated_at: string;
 }

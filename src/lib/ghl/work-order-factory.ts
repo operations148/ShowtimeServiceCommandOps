@@ -29,6 +29,45 @@ import {
   parseGhlDate,
   mapGhlPriority,
 } from "./map-opportunity";
+import { ghlFetch } from "./client";
+
+// ─── GHL Calendar API fallback ───────────────────────────────────────────────
+// When the webhook body doesn't include an appointment datetime (e.g. the GHL
+// workflow template doesn't include those fields yet), we call the Calendar API
+// to fetch the appointment details by its ID.
+
+interface GHLCalendarEvent {
+  id: string;
+  startTime?: string; // ISO datetime
+  endTime?: string;   // ISO datetime
+}
+
+async function fetchAppointmentFromCalendar(
+  appointmentId: string
+): Promise<{ date: string; time: string | null; timeEnd: string | null } | null> {
+  const result = await ghlFetch<{ event?: GHLCalendarEvent; appointment?: GHLCalendarEvent }>(
+    "GET",
+    `/calendars/events/${appointmentId}`
+  );
+  if (!result.ok) {
+    console.warn(`[ghl/factory] Calendar API fallback failed for appointment "${appointmentId}": ${result.error}`);
+    return null;
+  }
+  const event = result.data?.event ?? result.data?.appointment;
+  if (!event?.startTime) return null;
+
+  const dateMatch = /^(\d{4}-\d{2}-\d{2})/.exec(event.startTime);
+  if (!dateMatch) return null;
+
+  const timeMatch = /T(\d{2}:\d{2})/.exec(event.startTime);
+  const timeEndMatch = event.endTime ? /T(\d{2}:\d{2})/.exec(event.endTime) : null;
+
+  return {
+    date:    dateMatch[1]!,
+    time:    timeMatch ? timeMatch[1]! : null,
+    timeEnd: timeEndMatch ? timeEndMatch[1]! : null,
+  };
+}
 
 // ─── Stage-to-ServiceCategory defaults ───────────────────────────────────────
 
@@ -136,9 +175,34 @@ export async function createWorkOrderFromGHLStage(
   );
   const techId = resolveGhlUserToTechId(payload.assignedTo);
 
-  // For Diagnosis Booked, pull scheduled date from appointment custom field if present.
-  const rawDate = extractOppCustomField(payload.customFields, "GHL_CF_OPP_SCHEDULED_DATE");
-  const scheduledDate = parseGhlDate(rawDate);
+  // ── Appointment date/time — three-step resolution ────────────────────────────
+  // 1. Private fields injected by the webhook normalizer from the webhook body
+  // 2. Legacy customFields channel (env-var keyed — only works if GHL_CF_OPP_SCHEDULED_DATE is set)
+  // 3. GHL Calendar API fallback when appointmentId was captured
+  const rawPayload = payload as unknown as Record<string, string | undefined>;
+  let scheduledDate: string | undefined =
+    rawPayload._appointmentDate ??
+    parseGhlDate(extractOppCustomField(payload.customFields, "GHL_CF_OPP_SCHEDULED_DATE"));
+
+  let scheduledTimeStart: string | undefined = rawPayload._appointmentTime;
+  let scheduledTimeEnd: string | undefined;
+
+  if (!scheduledDate && rawPayload._appointmentId) {
+    console.log(`${tag} No date in webhook body — trying Calendar API fallback for appointment "${rawPayload._appointmentId}"`);
+    const calData = await fetchAppointmentFromCalendar(rawPayload._appointmentId);
+    if (calData) {
+      scheduledDate      = calData.date;
+      scheduledTimeStart = calData.time ?? undefined;
+      scheduledTimeEnd   = calData.timeEnd ?? undefined;
+      console.log(`${tag} Calendar API fallback success — date=${scheduledDate} time=${scheduledTimeStart ?? "none"}`);
+    } else {
+      console.warn(`${tag} Calendar API fallback returned nothing — scheduled_date will be null`);
+    }
+  }
+
+  if (!scheduledDate) {
+    console.warn(`${tag} No appointment date found in webhook body or Calendar API — WO will be created without scheduled_date`);
+  }
 
   const propertyAddress = property
     ? [
@@ -165,6 +229,8 @@ export async function createWorkOrderFromGHLStage(
       service_category:        serviceCategory,
       assigned_technician_id:  techId,
       scheduled_date:          scheduledDate,
+      scheduled_time_start:    scheduledTimeStart,
+      scheduled_time_end:      scheduledTimeEnd,
       estimate_handoff_status: EstimateHandoffStatus.NOT_NEEDED,
     },
     propertyAddress,
@@ -173,7 +239,8 @@ export async function createWorkOrderFromGHLStage(
 
   console.log(
     `${tag} Created WO ${workOrder.wo_number} ` +
-    `category="${workOrder.service_category}" customer="${customerName}" propertyLinked=${!!property}`
+    `category="${workOrder.service_category}" customer="${customerName}" ` +
+    `scheduledDate="${scheduledDate ?? "none"}" propertyLinked=${!!property}`
   );
 
   return { outcome: "created", workOrder };

@@ -62,6 +62,7 @@ export default async function TechJobDetailPage({ params }: Props) {
       initialChecklist={visit.checklist}
       visitId={visit.id}
       initialPhotoPaths={visit.photo_urls}
+      technicianName={session?.user?.name ?? undefined}
     />
   );
 }

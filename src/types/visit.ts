@@ -29,6 +29,8 @@ export interface Visit {
   photo_urls: string[];
   completed_at?: string;
   estimate_flagged: boolean;
+  completion_message?: string | null;
+  completed_by_name?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -249,6 +249,14 @@ export const mockMarketingPerformance: MarketingPerformanceData = {
 
 // ─── Mock/Live toggle ─────────────────────────────────────────────────────────
 
-export const USE_MOCK_DATA =
-  process.env.APP_ENV === 'development' ||
-  !process.env.GHL_PRIVATE_INTEGRATION_TOKEN
+export const USE_MOCK_DATA = (() => {
+  const env           = process.env.APP_ENV
+  const token         = process.env.GHL_PRIVATE_INTEGRATION_TOKEN
+  const reportingMode = process.env.NEXT_PUBLIC_REPORTING_MODE
+
+  if (reportingMode === 'live') return false
+  if (reportingMode === 'mock') return true
+  if (!token || token.trim() === '') return true
+  if (env === 'development') return true
+  return false
+})()

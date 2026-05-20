@@ -9,11 +9,11 @@ declare module "next-auth" {
   interface Session {
     user: {
       id: string;
-      name?: string | null;
+      name: string;
       email?: string | null;
       role: UserRole;
       tenant_id: string;
-      /** Work-order-store technician record ID (e.g. "tech-001"). Only set for TECHNICIAN role. */
+      /** For TECHNICIAN role — equals user.id in this schema. */
       technician_id?: string;
       avatar_url?: string | null;
     };
@@ -21,6 +21,7 @@ declare module "next-auth" {
 
   interface User {
     id: string;
+    name?: string | null;
     role: UserRole;
     tenant_id: string;
     technician_id?: string;
@@ -31,6 +32,7 @@ declare module "next-auth" {
 declare module "next-auth/jwt" {
   interface JWT {
     id: string;
+    name?: string | null;
     role: UserRole;
     tenant_id: string;
     technician_id?: string;

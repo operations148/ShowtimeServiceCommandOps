@@ -109,6 +109,10 @@ export const PatchWorkOrderSchema = z.object({
     .optional()
     .or(z.literal(""))
     .transform((v) => (v === "" ? undefined : v)),
+
+  tech_completion_message: z.string().max(500).optional(),
+  tech_completed_by:       z.string().max(200).optional(),
+  tech_completed_at:       z.string().optional(),
 });
 
 export type PatchWorkOrderInput = z.infer<typeof PatchWorkOrderSchema>;

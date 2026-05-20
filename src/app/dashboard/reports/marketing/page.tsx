@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Users, Calendar, DollarSign, TrendingUp, Target, BarChart2,
+  Users, Calendar, DollarSign, TrendingUp, Target, BarChart2, RefreshCw,
 } from 'lucide-react'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
@@ -193,9 +193,10 @@ export default function MarketingReportsPage() {
   const [filters, setFilters] = useState<ReportingFilters>({
     dateRange: defaultDateRange,
   })
-  const [data, setData] = useState<MarketingPerformanceData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [data, setData]               = useState<MarketingPerformanceData | null>(null)
+  const [loading, setLoading]         = useState(true)
+  const [error, setError]             = useState<string | null>(null)
+  const [refreshing, setRefreshing]   = useState(false)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -225,35 +226,52 @@ export default function MarketingReportsPage() {
     setFilters(prev => ({ ...prev, dateRange }))
   }
 
+  async function handleRefresh() {
+    if (refreshing) return
+    setRefreshing(true)
+    try {
+      await fetch('/api/reports/refresh', { method: 'POST' })
+    } catch {
+      // Non-fatal — still re-fetch
+    }
+    await fetchData()
+    setRefreshing(false)
+  }
+
   const trendSources = data?.trends.leadsBySource.length
     ? Object.keys(data.trends.leadsBySource[0]).filter(k => k !== 'date')
     : []
 
   function DataSourceBadge() {
     if (!data) return null
-    if (data.dataSource === 'mock') {
+    if (data.dataSource === 'live') {
       return (
-        <span
-          className="font-mono text-[10px] px-2 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-700"
-          title="Connect GHL to see live data"
-        >
-          DEMO DATA
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono font-semibold bg-[#ECFDF5] border border-[#A7F3D0] text-[#065F46]">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse" />
+          LIVE · GHL
         </span>
       )
     }
-    if (data.dataSource === 'live') {
+    if (data.dataSource === 'cached') {
       return (
-        <span className="inline-flex items-center gap-1.5 font-mono text-[10px] px-2 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-          LIVE
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono font-semibold bg-[#EFF6FF] border border-[#BFDBFE] text-[#1D4ED8]">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#3B82F6]" />
+          CACHED · {(data as { cacheAge?: number }).cacheAge ?? 0}s
         </span>
       )
     }
     return (
-      <span className="font-mono text-[10px] px-2 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-700">
-        CACHED
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono font-semibold bg-[#FFFBEB] border border-[#FCD34D] text-[#92400E]">
+        ⚠ DEMO DATA
       </span>
     )
+  }
+
+  function DataSourceStatus() {
+    if (!data) return null
+    if (data.dataSource === 'live')   return <span className="text-[11px] font-mono text-[#059669]">Live · just now</span>
+    if (data.dataSource === 'cached') return <span className="text-[11px] font-mono text-[#94A3B8]">Cached · {(data as { cacheAge?: number }).cacheAge ?? 0}s ago</span>
+    return <span className="text-[11px] font-mono text-[#F59E0B]">Demo data · connect GHL to see live</span>
   }
 
   return (
@@ -266,12 +284,28 @@ export default function MarketingReportsPage() {
           <p className="mt-1 text-sm text-slate-500">Source attribution and campaign ROI</p>
         </div>
         <div className="flex items-center gap-3 pt-1">
+          <DataSourceStatus />
           <DataSourceBadge />
           {data && (
             <span className="font-mono text-[11px] text-[#94A3B8]">
               {filters.dateRange.from} – {filters.dateRange.to}
             </span>
           )}
+          <button
+            onClick={() => void handleRefresh()}
+            disabled={refreshing || loading}
+            className={[
+              'inline-flex items-center gap-1.5 px-3 py-1.5',
+              'text-[12px] font-medium rounded-lg',
+              'border border-[#E2E8F0] bg-white',
+              'text-[#64748B] hover:text-[#0F172A]',
+              'hover:border-[#CBD5E1] transition-all',
+              (refreshing || loading) ? 'opacity-60 cursor-not-allowed' : '',
+            ].join(' ')}
+          >
+            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
         </div>
       </div>
 

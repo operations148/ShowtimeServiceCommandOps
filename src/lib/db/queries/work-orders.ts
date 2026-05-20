@@ -63,6 +63,9 @@ type WoJoinedRow = {
   ghl_sync_failed: boolean;
   recurring_schedule_id: string | null;
   ghl_trigger_stage: string | null;
+  tech_completion_message: string | null;
+  tech_completed_by: string | null;
+  tech_completed_at: string | null;
   created_at: string;
   updated_at: string;
   // Embedded joins
@@ -91,11 +94,14 @@ function mapRow(row: WoJoinedRow): WorkOrderWithRelations {
     completed_at:           nullToUndef(row.completed_at),
     estimate_handoff_status: row.estimate_handoff_status as EstimateHandoffStatus,
     estimate_notes:         nullToUndef(row.estimate_notes),
-    ghl_sync_failed:        row.ghl_sync_failed || undefined,
-    recurring_schedule_id:  nullToUndef(row.recurring_schedule_id),
-    ghl_trigger_stage:      nullToUndef(row.ghl_trigger_stage),
-    created_at:             row.created_at,
-    updated_at:             row.updated_at,
+    ghl_sync_failed:         row.ghl_sync_failed || undefined,
+    recurring_schedule_id:   nullToUndef(row.recurring_schedule_id),
+    ghl_trigger_stage:       nullToUndef(row.ghl_trigger_stage),
+    tech_completion_message: row.tech_completion_message,
+    tech_completed_by:       row.tech_completed_by,
+    tech_completed_at:       nullToUndef(row.tech_completed_at),
+    created_at:              row.created_at,
+    updated_at:              row.updated_at,
     // Computed relation fields
     property_address:       p ? `${p.address_line1}, ${p.city}, ${p.state} ${p.zip}` : "",
     property_customer_name: p?.customer_name ?? "",
@@ -134,6 +140,8 @@ export interface ListFilters {
   technician_id?: string;
   property_id?: string;
   estimate?: boolean; // when true, filter where estimate_handoff_status != 'not_needed'
+  date?: string;      // YYYY-MM-DD — filter by scheduled_date exact match
+  exclude_cancelled?: boolean; // when true, exclude cancelled work orders
 }
 
 // ---------------------------------------------------------------------------
@@ -151,11 +159,13 @@ export async function listWorkOrders(
     .eq("tenant_id", tenantId)
     .order("created_at", { ascending: false });
 
-  if (filters.status)        query = query.eq("status", filters.status);
-  if (filters.category)      query = query.eq("service_category", filters.category);
-  if (filters.technician_id) query = query.eq("assigned_technician_id", filters.technician_id);
-  if (filters.property_id)   query = query.eq("property_id", filters.property_id);
-  if (filters.estimate)      query = query.neq("estimate_handoff_status", EstimateHandoffStatus.NOT_NEEDED);
+  if (filters.status)            query = query.eq("status", filters.status);
+  if (filters.category)          query = query.eq("service_category", filters.category);
+  if (filters.technician_id)     query = query.eq("assigned_technician_id", filters.technician_id);
+  if (filters.property_id)       query = query.eq("property_id", filters.property_id);
+  if (filters.estimate)          query = query.neq("estimate_handoff_status", EstimateHandoffStatus.NOT_NEEDED);
+  if (filters.date)              query = query.eq("scheduled_date", filters.date);
+  if (filters.exclude_cancelled) query = query.neq("status", WorkOrderStatus.CANCELLED);
 
   const { data, error } = await query;
   if (error) throw new Error(`[db] listWorkOrders: ${error.message}`);

@@ -1,5 +1,8 @@
-import type { Metadata } from "next";
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import {
   MapPin,
   Clock,
@@ -9,10 +12,8 @@ import {
   AlertTriangle,
   CheckCircle2,
   Zap,
+  Sun,
 } from "lucide-react";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth/config";
-import { listWorkOrders } from "@/lib/db/queries/work-orders";
 import { cn } from "@/lib/utils";
 import {
   WorkOrderStatus,
@@ -20,8 +21,6 @@ import {
   ServiceCategory,
   type WorkOrderWithRelations,
 } from "@/types/work-order";
-
-export const metadata: Metadata = { title: "Today's Jobs" };
 
 // ─── Label maps ───────────────────────────────────────────────────────────────
 
@@ -52,10 +51,10 @@ const STATUS_CONFIG: Record<
 };
 
 const PRIORITY_CONFIG: Record<Priority, { label: string; bar: string; badge: string }> = {
-  [Priority.LOW]:    { label: "",       bar: "",             badge: ""                            },
-  [Priority.NORMAL]: { label: "",       bar: "",             badge: ""                            },
-  [Priority.HIGH]:   { label: "High",   bar: "bg-amber-400", badge: "bg-amber-50 text-amber-700"  },
-  [Priority.URGENT]: { label: "Urgent", bar: "bg-red-500",   badge: "bg-red-50 text-red-600"      },
+  [Priority.LOW]:    { label: "",       bar: "",             badge: ""                           },
+  [Priority.NORMAL]: { label: "",       bar: "",             badge: ""                           },
+  [Priority.HIGH]:   { label: "High",   bar: "bg-amber-400", badge: "bg-amber-50 text-amber-700" },
+  [Priority.URGENT]: { label: "Urgent", bar: "bg-red-500",   badge: "bg-red-50 text-red-600"     },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -63,8 +62,8 @@ const PRIORITY_CONFIG: Record<Priority, { label: string; bar: string; badge: str
 function formatTime(hhmm?: string): { time: string; ampm: string } | null {
   if (!hhmm) return null;
   const [hStr, mStr] = hhmm.split(":");
-  const h = parseInt(hStr, 10);
-  const m = parseInt(mStr, 10);
+  const h = parseInt(hStr ?? "0", 10);
+  const m = parseInt(mStr ?? "0", 10);
   const ampm = h >= 12 ? "PM" : "AM";
   const h12 = h % 12 === 0 ? 12 : h % 12;
   return { time: `${h12}:${String(m).padStart(2, "0")}`, ampm };
@@ -74,6 +73,11 @@ function splitAddress(full: string): { street: string; cityState: string } {
   const idx = full.indexOf(",");
   if (idx === -1) return { street: full, cityState: "" };
   return { street: full.slice(0, idx).trim(), cityState: full.slice(idx + 1).trim() };
+}
+
+function formatShortDate(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
 // ─── Date Header ──────────────────────────────────────────────────────────────
@@ -128,7 +132,7 @@ function JobCard({ job }: { job: WorkOrderWithRelations }) {
         <span className={cn("absolute left-0 top-0 h-full w-1 rounded-l-2xl", priority.bar)} />
       )}
 
-      <div className="flex min-h-[88px] items-start gap-3.5 pl-5 pr-4 pt-4 pb-4">
+      <div className="flex min-h-[88px] items-start gap-3.5 pb-4 pl-5 pr-4 pt-4">
         <div className="flex w-14 shrink-0 flex-col items-center pt-0.5 text-center">
           {timeInfo ? (
             <>
@@ -144,7 +148,7 @@ function JobCard({ job }: { job: WorkOrderWithRelations }) {
           )}
         </div>
 
-        <div className="mt-1 flex w-px self-stretch flex-col items-center">
+        <div className="mt-1 flex w-px flex-col items-center self-stretch">
           <div
             className={cn(
               "h-2.5 w-2.5 rounded-full border-2",
@@ -222,34 +226,86 @@ function JobCard({ job }: { job: WorkOrderWithRelations }) {
   );
 }
 
+// ─── Compact upcoming card ─────────────────────────────────────────────────────
+
+function UpcomingCard({ job }: { job: WorkOrderWithRelations }) {
+  const { street } = splitAddress(job.property_address);
+  return (
+    <Link
+      href={`/tech/job/${job.id}`}
+      className="flex items-center justify-between rounded-xl bg-white px-4 py-3 shadow-sm active:shadow-md"
+    >
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] font-semibold text-slate-400">
+          {job.scheduled_date ? formatShortDate(job.scheduled_date) : "Unscheduled"}
+        </p>
+        <p className="truncate text-sm font-semibold text-slate-800">
+          {job.property_customer_name}
+        </p>
+        <p className="truncate text-xs text-slate-400">{street}</p>
+      </div>
+      <ChevronRight className="ml-2 h-4 w-4 shrink-0 text-slate-300" />
+    </Link>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 const TERMINAL = new Set([WorkOrderStatus.COMPLETED, WorkOrderStatus.CANCELLED]);
 
-export default async function TechTodayPage() {
-  const session = await getServerSession(authOptions);
-  const tenantId = session?.user.tenant_id ?? "tenant-showtime";
-  const technicianId = session?.user.technician_id;
+export default function TechTodayPage() {
+  const { data: session, status: sessionStatus } = useSession();
+  const [allJobs, setAllJobs] = useState<WorkOrderWithRelations[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const techUserId = session?.user?.id;
   const today = new Date().toISOString().slice(0, 10);
 
-  const allWos = await listWorkOrders({
-    tenant_id:     tenantId,
-    technician_id: technicianId,
-  });
+  useEffect(() => {
+    if (sessionStatus === "loading") return;
+    if (!techUserId) return;
 
-  const activeWos = allWos.filter((wo) => !TERMINAL.has(wo.status));
+    const params = new URLSearchParams({
+      assigned_technician_id: techUserId,
+      view: "tech",
+    });
 
-  const overdueJobs = activeWos
+    setLoading(true);
+    fetch(`/api/work-orders?${params.toString()}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d: { data?: WorkOrderWithRelations[] }) => setAllJobs(d.data ?? []))
+      .catch(() => setAllJobs([]))
+      .finally(() => setLoading(false));
+  }, [techUserId, sessionStatus]);
+
+  const activeJobs = allJobs.filter((wo) => !TERMINAL.has(wo.status));
+
+  const overdueJobs = activeJobs
     .filter((wo) => wo.scheduled_date && wo.scheduled_date < today)
     .sort((a, b) => (a.scheduled_date ?? "").localeCompare(b.scheduled_date ?? ""));
 
-  const todayJobs = activeWos
+  const todayJobs = activeJobs
     .filter((wo) => wo.scheduled_date === today || !wo.scheduled_date)
     .sort((a, b) =>
       (a.scheduled_time_start ?? "99:99").localeCompare(b.scheduled_time_start ?? "99:99")
     );
 
+  // Upcoming = next 3 days (used in empty state)
+  const upcomingJobs = activeJobs
+    .filter((wo) => wo.scheduled_date && wo.scheduled_date > today)
+    .sort((a, b) => (a.scheduled_date ?? "").localeCompare(b.scheduled_date ?? ""))
+    .slice(0, 6);
+
   const allVisible = [...overdueJobs, ...todayJobs];
+
+  if (loading || sessionStatus === "loading") {
+    return (
+      <div className="flex flex-col items-center gap-3 py-24 text-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-brand-500" />
+        <p className="text-sm text-slate-400">Loading your jobs…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col">
@@ -274,9 +330,32 @@ export default async function TechTodayPage() {
         )}
 
         {todayJobs.length === 0 && overdueJobs.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 py-16 text-center">
-            <CheckCircle2 className="h-10 w-10 text-emerald-300" />
-            <p className="text-sm font-medium text-slate-500">No jobs scheduled for today</p>
+          /* ── Empty state ── */
+          <div className="flex flex-col items-center gap-4 py-14 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-cyan-50">
+              <Sun className="h-8 w-8 text-cyan-500" />
+            </div>
+            <div>
+              <p className="text-lg font-bold text-slate-800">All clear for today! ☀️</p>
+              <p className="mt-1 text-sm text-slate-500">
+                No jobs scheduled for today.
+                <br />
+                Check with your manager for updates.
+              </p>
+            </div>
+
+            {upcomingJobs.length > 0 && (
+              <div className="mt-4 w-full">
+                <p className="mb-2 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Coming up
+                </p>
+                <div className="space-y-2">
+                  {upcomingJobs.map((job) => (
+                    <UpcomingCard key={job.id} job={job} />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ) : todayJobs.length === 0 ? (
           <div className="flex flex-col items-center gap-3 py-8 text-center">

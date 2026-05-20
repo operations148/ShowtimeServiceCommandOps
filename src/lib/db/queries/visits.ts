@@ -36,26 +36,30 @@ type VisitRow = {
   photo_urls: string[] | null;
   completed_at: string | null;
   estimate_flagged: boolean;
+  completion_message: string | null;
+  completed_by_name: string | null;
   created_at: string;
   updated_at: string;
 };
 
 function mapVisitRow(row: VisitRow): Visit {
   return {
-    id:               row.id,
-    tenant_id:        row.tenant_id,
-    work_order_id:    row.work_order_id,
-    property_id:      row.property_id,
-    technician_id:    nullToUndef(row.technician_id),
-    status:           row.status as VisitStatus,
-    scheduled_date:   row.scheduled_date,
-    checklist:        row.checklist ?? [],
-    technician_notes: nullToUndef(row.technician_notes),
-    photo_urls:       row.photo_urls ?? [],
-    completed_at:     nullToUndef(row.completed_at),
-    estimate_flagged: row.estimate_flagged,
-    created_at:       row.created_at,
-    updated_at:       row.updated_at,
+    id:                 row.id,
+    tenant_id:          row.tenant_id,
+    work_order_id:      row.work_order_id,
+    property_id:        row.property_id,
+    technician_id:      nullToUndef(row.technician_id),
+    status:             row.status as VisitStatus,
+    scheduled_date:     row.scheduled_date,
+    checklist:          row.checklist ?? [],
+    technician_notes:   nullToUndef(row.technician_notes),
+    photo_urls:         row.photo_urls ?? [],
+    completed_at:       nullToUndef(row.completed_at),
+    estimate_flagged:   row.estimate_flagged,
+    completion_message: row.completion_message,
+    completed_by_name:  row.completed_by_name,
+    created_at:         row.created_at,
+    updated_at:         row.updated_at,
   };
 }
 
@@ -227,11 +231,13 @@ export async function updateVisit(
 
   // Build update payload
   const updatePayload: Record<string, unknown> = {};
-  if (patch.status           !== undefined) updatePayload.status           = patch.status;
-  if (patch.technician_notes !== undefined) updatePayload.technician_notes = patch.technician_notes;
-  if (patch.estimate_flagged !== undefined) updatePayload.estimate_flagged = patch.estimate_flagged;
-  if (patch.completed_at     !== undefined) updatePayload.completed_at     = patch.completed_at;
-  if (patch.checklist        !== undefined) {
+  if (patch.status             !== undefined) updatePayload.status             = patch.status;
+  if (patch.technician_notes   !== undefined) updatePayload.technician_notes   = patch.technician_notes;
+  if (patch.estimate_flagged   !== undefined) updatePayload.estimate_flagged   = patch.estimate_flagged;
+  if (patch.completed_at       !== undefined) updatePayload.completed_at       = patch.completed_at;
+  if (patch.completion_message !== undefined) updatePayload.completion_message = patch.completion_message;
+  if (patch.completed_by_name  !== undefined) updatePayload.completed_by_name  = patch.completed_by_name;
+  if (patch.checklist          !== undefined) {
     updatePayload.checklist = patch.checklist as unknown as Record<string, unknown>[];
   }
 

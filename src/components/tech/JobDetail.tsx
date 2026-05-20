@@ -14,6 +14,7 @@ import {
   Loader2,
   X,
   ImageIcon,
+  MessageSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -32,6 +33,7 @@ interface Props {
   initialChecklist: ChecklistItem[];
   visitId: string;
   initialPhotoPaths?: string[];
+  technicianName?: string;
 }
 
 // ─── Photo state ──────────────────────────────────────────────────────────────
@@ -50,19 +52,31 @@ const MAX_PHOTOS = 10;
 
 // The page moves through a linear state machine.
 type Phase =
-  | "idle"             // Normal — checklist interactive, actions available
-  | "warn_incomplete"  // Complete tapped but items unchecked — show warning
-  | "estimate_prompt"  // Estimate tapped — show notes sheet
-  | "submitting"       // API call in flight
-  | "done_complete"    // Visit saved as COMPLETED
-  | "done_estimate";   // Visit saved with estimate_flagged = true
+  | "idle"               // Normal — checklist interactive, actions available
+  | "warn_incomplete"    // Complete tapped but items unchecked — show warning
+  | "completion_modal"   // Ready to complete — show required message textarea
+  | "estimate_prompt"    // Estimate tapped — show notes sheet
+  | "submitting"         // API call in flight
+  | "done_complete"      // Visit saved as COMPLETED
+  | "done_estimate";     // Visit saved with estimate_flagged = true
 
 interface DoneSummary {
   checkedCount: number;
   totalCount: number;
   hasNotes: boolean;
   completedAt: string; // ISO
+  completionMessage: string;
 }
+
+const QUICK_TAGS = [
+  "All chemical levels balanced",
+  "Brushed walls and steps",
+  "Emptied skimmer baskets",
+  "Vacuumed pool floor",
+  "Filter backwashed",
+  "Equipment checked and operational",
+  "Customer contacted",
+];
 
 // ─── Label maps ───────────────────────────────────────────────────────────────
 
@@ -128,15 +142,13 @@ function CompletionScreen({ wo, summary }: { wo: WorkOrderWithRelations; summary
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
-      {/* Top bar matches TechShell but themed green */}
       <div className="flex flex-col items-center px-6 pb-10 pt-16 text-center">
-        {/* Big check circle */}
         <div className="flex h-24 w-24 items-center justify-center rounded-full bg-emerald-100 shadow-[0_0_0_12px_rgba(16,185,129,0.08)]">
           <CheckCircle2 className="h-12 w-12 text-emerald-500" strokeWidth={1.5} />
         </div>
 
         <h1 className="mt-6 font-display text-2xl font-bold text-slate-900">
-          Job Complete
+          Job Complete 🎉
         </h1>
         <p className="mt-1 text-sm text-slate-500">
           {wo.wo_number} &middot; {wo.property_customer_name}
@@ -148,6 +160,18 @@ function CompletionScreen({ wo, summary }: { wo: WorkOrderWithRelations; summary
 
       {/* Summary cards */}
       <div className="space-y-2 px-6">
+        {/* Completion message */}
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4">
+          <div className="mb-2 flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-emerald-600" />
+            <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
+              Completion Summary
+            </p>
+          </div>
+          <p className="text-sm leading-relaxed text-emerald-900">{summary.completionMessage}</p>
+          <p className="mt-1.5 text-[11px] text-emerald-600">Admin dashboard has been updated</p>
+        </div>
+
         <div className={cn(
           "flex items-center gap-3 rounded-2xl px-4 py-4",
           allChecked ? "bg-emerald-50 border border-emerald-200" : "bg-amber-50 border border-amber-200"
@@ -258,15 +282,16 @@ function EstimateScreen({ wo, summary }: { wo: WorkOrderWithRelations; summary: 
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export function JobDetail({ wo, property, initialChecklist, visitId, initialPhotoPaths = [] }: Props) {
-  const [checklist, setChecklist]           = useState<ChecklistItem[]>(initialChecklist);
-  const [notes, setNotes]                   = useState("");
-  const [estimateNotes, setEstimateNotes]   = useState("");
-  const [phase, setPhase]                   = useState<Phase>("idle");
-  const [apiError, setApiError]             = useState<string | null>(null);
-  const [doneSummary, setDoneSummary]       = useState<DoneSummary | null>(null);
-  const [photos, setPhotos]                 = useState<PhotoItem[]>([]);
-  const fileInputRef                        = useRef<HTMLInputElement>(null);
+export function JobDetail({ wo, property, initialChecklist, visitId, initialPhotoPaths = [], technicianName }: Props) {
+  const [checklist, setChecklist]             = useState<ChecklistItem[]>(initialChecklist);
+  const [notes, setNotes]                     = useState("");
+  const [estimateNotes, setEstimateNotes]     = useState("");
+  const [completionMessage, setCompletionMessage] = useState("");
+  const [phase, setPhase]                     = useState<Phase>("idle");
+  const [apiError, setApiError]               = useState<string | null>(null);
+  const [doneSummary, setDoneSummary]         = useState<DoneSummary | null>(null);
+  const [photos, setPhotos]                   = useState<PhotoItem[]>([]);
+  const fileInputRef                          = useRef<HTMLInputElement>(null);
 
   // ── Load existing photos on mount ────────────────────────────────────────
 
@@ -431,21 +456,31 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
     if (!allChecked) {
       setPhase("warn_incomplete");
     } else {
-      submitComplete();
+      setPhase("completion_modal");
     }
   }
 
   async function submitComplete() {
+    const msg = completionMessage.trim();
+    if (msg.length < 10) return; // enforce minimum in modal
     const now = new Date().toISOString();
     const ok = await patchVisit({
-      status:           VisitStatus.COMPLETED,
+      status:             VisitStatus.COMPLETED,
       checklist,
-      technician_notes: notes || undefined,
-      estimate_flagged: false,
-      completed_at:     now,
+      technician_notes:   notes || undefined,
+      estimate_flagged:   false,
+      completed_at:       now,
+      completion_message: msg,
+      completed_by_name:  technicianName ?? undefined,
     });
     if (ok) {
-      setDoneSummary({ checkedCount, totalCount, hasNotes: notes.trim().length > 0, completedAt: now });
+      setDoneSummary({
+        checkedCount,
+        totalCount,
+        hasNotes:          notes.trim().length > 0,
+        completedAt:       now,
+        completionMessage: msg,
+      });
       setPhase("done_complete");
     }
   }
@@ -464,8 +499,9 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
       setDoneSummary({
         checkedCount,
         totalCount,
-        hasNotes: combinedNotes.trim().length > 0,
-        completedAt: now,
+        hasNotes:          combinedNotes.trim().length > 0,
+        completedAt:       now,
+        completionMessage: "",
       });
       setPhase("done_estimate");
     }
@@ -789,7 +825,7 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
               </button>
               <button
                 type="button"
-                onClick={submitComplete}
+                onClick={() => setPhase("completion_modal")}
                 className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-4 text-sm font-semibold text-white active:opacity-80"
               >
                 <CheckCircle2 className="h-4 w-4" />
@@ -808,6 +844,103 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
         )}
 
       </div>
+
+      {/* ── Completion message overlay (bottom sheet) ───────────────────────── */}
+      {phase === "completion_modal" && (
+        <div className="fixed inset-0 z-30 flex items-end">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setPhase(allChecked ? "idle" : "warn_incomplete")}
+          />
+
+          {/* Sheet */}
+          <div className="relative w-full rounded-t-3xl bg-white px-4 pb-8 pt-5 shadow-xl">
+            {/* Handle */}
+            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-slate-200" />
+
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="font-display text-lg font-bold text-slate-900">Completion Summary</h2>
+                <p className="mt-0.5 text-sm text-slate-500">
+                  Write a brief summary for the office. Required.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPhase(allChecked ? "idle" : "warn_incomplete")}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 active:bg-slate-200"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Quick tags */}
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {QUICK_TAGS.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() =>
+                    setCompletionMessage((prev) =>
+                      prev ? `${prev}. ${tag}` : tag
+                    )
+                  }
+                  className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 active:bg-emerald-100"
+                >
+                  + {tag}
+                </button>
+              ))}
+            </div>
+
+            <textarea
+              value={completionMessage}
+              onChange={(e) => setCompletionMessage(e.target.value)}
+              autoFocus
+              placeholder="e.g. Serviced pool — balanced chemicals, brushed walls, vacuumed floor, emptied baskets. Equipment all checked and operational."
+              rows={4}
+              className={cn(
+                "mt-3 w-full resize-none rounded-xl border bg-slate-50 px-3 py-3",
+                "text-sm leading-relaxed text-slate-800 placeholder:text-slate-400",
+                "focus:bg-white focus:outline-none focus:ring-2 transition-colors",
+                completionMessage.trim().length > 0 && completionMessage.trim().length < 10
+                  ? "border-amber-300 focus:border-amber-400 focus:ring-amber-100"
+                  : "border-slate-200 focus:border-emerald-400 focus:ring-emerald-100"
+              )}
+            />
+            <div className="mt-1 flex items-center justify-between">
+              <p className={cn(
+                "text-xs",
+                completionMessage.trim().length < 10 ? "text-amber-600" : "text-slate-400"
+              )}>
+                {completionMessage.trim().length < 10
+                  ? `${10 - completionMessage.trim().length} more character${10 - completionMessage.trim().length !== 1 ? "s" : ""} required`
+                  : "Looks good ✓"}
+              </p>
+              <p className="text-xs text-slate-400">{completionMessage.length}/500</p>
+            </div>
+
+            <div className="mt-4 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setPhase(allChecked ? "idle" : "warn_incomplete")}
+                className="flex flex-1 items-center justify-center rounded-2xl border-2 border-slate-200 bg-white py-4 text-sm font-semibold text-slate-700 active:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitComplete()}
+                disabled={completionMessage.trim().length < 10}
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-4 text-sm font-semibold text-white active:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Submit &amp; Complete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Estimate prompt overlay (bottom sheet) ──────────────────────────── */}
       {phase === "estimate_prompt" && (

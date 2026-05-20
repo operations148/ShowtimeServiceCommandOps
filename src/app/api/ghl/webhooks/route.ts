@@ -130,9 +130,12 @@ function getField(payload: Record<string, any>, ...keys: string[]): string | nul
 
 // Parse a date string from GHL into "YYYY-MM-DD" for the scheduled_date column.
 // Handles ISO timestamps, date-only strings, and US "MM/DD/YYYY" format.
+// Returns null if the value is an unreplaced GHL merge tag (e.g. "{{appointment.startTime}}").
 function parseAppointmentDate(raw: string | null): string | null {
   if (!raw) return null;
   const trimmed = raw.trim();
+  // Guard against unreplaced GHL merge tags — treat as missing
+  if (trimmed.includes("{{")) return null;
   // ISO timestamp: "2026-05-20T10:00:00.000Z" or with offset
   if (/^\d{4}-\d{2}-\d{2}T/.test(trimmed)) return trimmed.slice(0, 10);
   // Date-only: "2026-05-20"
@@ -144,6 +147,15 @@ function parseAppointmentDate(raw: string | null): string | null {
     return `${y}-${m!.padStart(2, "0")}-${d!.padStart(2, "0")}`;
   }
   return null;
+}
+
+// Extract HH:MM time from an ISO datetime string. Returns null if not an ISO timestamp.
+function parseAppointmentTime(raw: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (trimmed.includes("{{")) return null;
+  const match = /T(\d{2}:\d{2})/.exec(trimmed);
+  return match ? match[1]! : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,24 +237,37 @@ export async function POST(request: NextRequest) {
     raw.contact.name = contactName;
   }
 
-  // Extract appointment date — GHL template field name varies:
-  //   appointmentStartTime  (recommended template key)
-  //   appointmentStart      (some GHL versions)
-  //   appointmentS          (truncated key seen in GHL UI screenshot)
-  //   appointment_start / appointmentDate (alternate naming)
+  // Extract appointment datetime — GHL template field name varies across versions.
+  // We check all known variants and store the parsed values as private underscore fields
+  // directly on `raw` so the factory can read them without an env-var lookup.
   const appointmentStart = getField(
     raw,
+    "appointmentStartDateTime",  // preferred — full ISO datetime
     "appointmentStartTime",
     "appointmentStart",
-    "appointmentS",
+    "appointmentS",              // truncated key seen in some GHL UI versions
     "appointment_start",
     "appointmentDate",
     "appointment_only_start_date",
   );
-  if (appointmentStart && !Array.isArray(raw.customFields)) {
-    const dateValue = parseAppointmentDate(appointmentStart) ?? appointmentStart;
-    raw.customFields = [{ id: "GHL_CF_OPP_SCHEDULED_DATE", fieldValue: dateValue }];
-  }
+
+  const appointmentDateValue = parseAppointmentDate(appointmentStart);
+  const appointmentTimeValue = parseAppointmentTime(appointmentStart);
+
+  // appointmentId — used as Calendar API fallback key
+  const appointmentId = getField(
+    raw,
+    "appointmentId",
+    "appointment_id",
+    "calendarEventId",
+    "eventId",
+  );
+
+  // Store as private payload fields so the factory reads them directly,
+  // bypassing the env-var-keyed customFields lookup chain.
+  if (appointmentDateValue) raw._appointmentDate = appointmentDateValue;
+  if (appointmentTimeValue) raw._appointmentTime = appointmentTimeValue;
+  if (appointmentId) raw._appointmentId = appointmentId;
 
   // Diagnostic log — shows exactly what arrived so we can see name/date extraction
   console.log(
@@ -250,10 +275,13 @@ export async function POST(request: NextRequest) {
     Object.keys(raw).join(", "),
   );
   console.log(
-    "[GHL Webhook] Key fields — name=%s contactId=%s appointmentStart=%s stage=%s",
+    "[GHL Webhook] Key fields — name=%s contactId=%s appointmentStart=%s date=%s time=%s apptId=%s stage=%s",
     contactName ?? "(none)",
     raw.contactId ?? "(none)",
     appointmentStart ?? "(none)",
+    raw._appointmentDate ?? "(none)",
+    raw._appointmentTime ?? "(none)",
+    raw._appointmentId ?? "(none)",
     raw.pipelineStageName ?? raw.pipelineStage?.name ?? "(none)",
   );
 
