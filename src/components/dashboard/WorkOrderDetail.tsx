@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
 import {
   User,
@@ -298,6 +299,7 @@ export function WorkOrderDetail({
   workOrder: WorkOrderWithRelations;
   visitId?: string;
 }) {
+  const { data: session } = useSession();
   const [status, setStatus] = useState<WorkOrderStatus>(workOrder.status);
   const [estimateHandoff, setEstimateHandoff] = useState<EstimateHandoffStatus>(
     workOrder.estimate_handoff_status
@@ -661,9 +663,9 @@ export function WorkOrderDetail({
 
   const openEmailModal = useCallback(() => {
     setEmailNotes((workOrder as unknown as Record<string, unknown>).estimate_notes as string ?? "");
-    setEmailRecipient("");
+    setEmailRecipient(session?.user?.email ?? "");
     setEmailModalOpen(true);
-  }, [workOrder]);
+  }, [workOrder, session]);
 
   const handleSendEstimateEmail = useCallback(async () => {
     if (!emailRecipient.trim()) return;

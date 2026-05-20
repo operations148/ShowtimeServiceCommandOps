@@ -103,12 +103,15 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     !existingVisit.estimate_flagged && updatedVisit.estimate_flagged;
 
   if (estimateFlaggedNow) {
-    // Update work order status + estimate_handoff_status field
+    // Update work order status + estimate_handoff_status field; propagate tech's estimate notes
     void updateWorkOrder(
       updatedVisit.work_order_id,
       {
         status: WorkOrderStatus.ESTIMATE_NEEDED,
         estimate_handoff_status: EstimateHandoffStatus.FLAGGED,
+        ...(result.data.estimate_flag_notes
+          ? { estimate_notes: result.data.estimate_flag_notes }
+          : {}),
       },
       tenantId
     );

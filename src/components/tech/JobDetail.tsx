@@ -489,11 +489,12 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
     const now = new Date().toISOString();
     const combinedNotes = [notes, estimateNotes].filter(Boolean).join("\n\n---\n\nEstimate notes:\n");
     const ok = await patchVisit({
-      status:           VisitStatus.IN_PROGRESS,
+      status:              VisitStatus.IN_PROGRESS,
       checklist,
-      technician_notes: combinedNotes || undefined,
-      estimate_flagged: true,
-      completed_at:     now,
+      technician_notes:    combinedNotes || undefined,
+      estimate_flagged:    true,
+      estimate_flag_notes: estimateNotes || undefined,
+      completed_at:        now,
     });
     if (ok) {
       setDoneSummary({
