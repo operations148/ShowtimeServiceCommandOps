@@ -113,6 +113,9 @@ export const PatchWorkOrderSchema = z.object({
   tech_completion_message: z.string().max(500).optional(),
   tech_completed_by:       z.string().max(200).optional(),
   tech_completed_at:       z.string().optional(),
+
+  // Allows TENANT_ADMIN / PLATFORM_OWNER to mutate a locked estimate handoff
+  override: z.boolean().optional(),
 });
 
 export type PatchWorkOrderInput = z.infer<typeof PatchWorkOrderSchema>;

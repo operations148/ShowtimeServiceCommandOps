@@ -52,6 +52,12 @@ export const adminNavItems: NavItem[] = [
     roles: [UserRole.PLATFORM_OWNER, UserRole.TENANT_ADMIN, UserRole.OFFICE_STAFF],
   },
   {
+    label: "Invoices",
+    href: "/dashboard/invoices",
+    icon: "Receipt",
+    roles: [UserRole.PLATFORM_OWNER, UserRole.TENANT_ADMIN, UserRole.OFFICE_STAFF],
+  },
+  {
     label: "Reports",
     href: "/dashboard/reports",
     icon: "BarChart2",

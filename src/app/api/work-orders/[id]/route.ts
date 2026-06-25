@@ -6,6 +6,7 @@ import {
   deleteWorkOrder,
 } from "@/lib/db/queries/work-orders";
 import { WorkOrderStatus, EstimateHandoffStatus } from "@/types/work-order";
+import { UserRole } from "@/types/technician";
 import { syncCompletionToGhl } from "@/lib/ghl/sync-completion";
 import { requireApiAuth, requirePermission, isTechnicianScoped, getTenantId } from "@/lib/auth/api-auth";
 import { db } from "@/lib/db/client";
@@ -88,9 +89,45 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   }
 
   // Extract non-DB fields before passing to update layer
-  const { retry_ghl_sync: retryGhlSync, estimate_notes: estimateNotes, ...dbPatch } = result.data;
+  const { retry_ghl_sync: retryGhlSync, estimate_notes: estimateNotes, override, ...dbPatch } = result.data;
   // estimate_notes IS a DB column — include it back in the patch
   const fullDbPatch = estimateNotes !== undefined ? { ...dbPatch, estimate_notes: estimateNotes } : dbPatch;
+
+  // ── Estimate lock guard ────────────────────────────────────────────────────
+  // If estimate_handoff_status is being changed, check whether the handoff is
+  // locked. Locked records are immutable unless the caller is TENANT_ADMIN or
+  // PLATFORM_OWNER and passes { override: true } in the request body.
+  type HandoffLockRow = { id: string; status: string; locked_at: string | null };
+  let lockedHandoff: { id: string; status: string } | null = null;
+  if (fullDbPatch.estimate_handoff_status !== undefined) {
+    let handoffRow: HandoffLockRow | null = null;
+    try {
+      const { data, error: fetchErr } = await db
+        .from("estimate_handoffs")
+        .select("id, status, locked_at")
+        .eq("work_order_id", id)
+        .eq("tenant_id", tenantId)
+        .maybeSingle();
+      if (fetchErr) throw fetchErr;
+      handoffRow = data as HandoffLockRow | null;
+    } catch (err) {
+      console.error("[api] PATCH estimate_handoffs lock check:", err);
+      return NextResponse.json({ error: "Failed to check estimate lock" }, { status: 500 });
+    }
+
+    if (handoffRow?.locked_at) {
+      const role = auth.session.user.role as UserRole;
+      const canOverride =
+        (role === UserRole.TENANT_ADMIN || role === UserRole.PLATFORM_OWNER) &&
+        override === true;
+
+      if (!canOverride) {
+        return NextResponse.json({ error: "Estimate is locked" }, { status: 409 });
+      }
+
+      lockedHandoff = { id: handoffRow.id, status: handoffRow.status };
+    }
+  }
 
   let updateResult;
   try {
@@ -116,6 +153,22 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
   const updatedWo = updateResult.data;
   const changedByName = (auth.session.user as { name?: string }).name ?? "Admin";
+
+  // ── Estimate lock override audit log ───────────────────────────────────────
+  if (lockedHandoff) {
+    db.from("user_activity_log")
+      .insert({
+        tenant_id:   tenantId,
+        user_id:     auth.session.user.id,
+        action_type: "estimate.lock_override",
+        description: `before: ${lockedHandoff.status}, after: ${fullDbPatch.estimate_handoff_status ?? "unknown"}`,
+        entity_type: "estimate_handoff",
+        entity_id:   lockedHandoff.id,
+      })
+      .then(({ error }) => {
+        if (error) console.error("[api] estimate lock override log:", error.message);
+      });
+  }
 
   // ── Status history log ─────────────────────────────────────────────────────
   if (fullDbPatch.status && fullDbPatch.status !== workOrder.status) {

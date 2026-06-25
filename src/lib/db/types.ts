@@ -66,6 +66,9 @@ export interface TenantRow {
   ghl_api_token_encrypted: string | null;
   is_active: boolean;
   plan: string | null;
+  stripe_account_id: string | null;
+  stripe_charges_enabled: boolean;
+  stripe_onboarding_completed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -214,7 +217,7 @@ export interface Database {
     Tables: {
       tenants: {
         Row: TenantRow;
-        Insert: Omit<TenantRow, "id" | "created_at" | "updated_at"> & { id?: string };
+        Insert: Omit<TenantRow, "id" | "created_at" | "updated_at"> & { id?: string; stripe_charges_enabled?: boolean };
         Update: Partial<Omit<TenantRow, "id" | "created_at">>;
         Relationships: [];
       };
