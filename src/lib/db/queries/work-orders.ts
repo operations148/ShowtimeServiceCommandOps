@@ -455,14 +455,14 @@ export async function findAnyByGhlOpportunityId(
 // deleteWorkOrder
 // ---------------------------------------------------------------------------
 
+// tenantId is required (not optional) — security-audit M2: an optional
+// parameter meant this function could in principle run tenant-unscoped if a
+// future caller omitted it. It cannot compile without one now.
 export async function deleteWorkOrder(
   id: string,
-  tenantId?: string
+  tenantId: string
 ): Promise<boolean> {
-  let query = db.from("work_orders").delete().eq("id", id);
-  if (tenantId) query = query.eq("tenant_id", tenantId);
-
-  const { error } = await query;
+  const { error } = await db.from("work_orders").delete().eq("id", id).eq("tenant_id", tenantId);
   if (error) throw new Error(`[db] deleteWorkOrder: ${error.message}`);
   return true;
 }

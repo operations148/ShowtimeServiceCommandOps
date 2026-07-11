@@ -193,8 +193,11 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "Visit not found" }, { status: 404 });
   }
 
-  // Validate this path belongs to this visit's tenant (path starts with tenantId/)
-  if (!path.startsWith(`${tenantId}/`)) {
+  // Validate this path belongs to THIS visit specifically (security-audit M7 —
+  // the prior check only verified the tenant-id prefix, so any user who owned
+  // some visit in the tenant could delete another visit's photo by supplying
+  // its path). photo_urls is the authoritative membership list for this visit.
+  if (!(visit.photo_urls ?? []).includes(path)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

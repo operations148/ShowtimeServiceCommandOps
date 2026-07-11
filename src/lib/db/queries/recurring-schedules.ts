@@ -171,16 +171,28 @@ export async function updateRecurringSchedule(
 
 // ---------------------------------------------------------------------------
 // deleteRecurringSchedule
+//
+// Soft delete (is_active = false) rather than a hard DELETE (security-audit
+// M2/M3 pattern — the is_active column already existed but was previously
+// ignored in favor of a real row delete). tenantId is required, not optional,
+// so this function cannot run tenant-unscoped. Returns the updated row (or
+// undefined if not found) instead of relying on a `count` that Supabase-js
+// only populates when the query is built with `{ count: "exact" }` — the
+// previous implementation always evaluated to `false` because of this.
 // ---------------------------------------------------------------------------
 
 export async function deleteRecurringSchedule(
   id: string,
-  tenantId?: string
+  tenantId: string
 ): Promise<boolean> {
-  let query = db.from("recurring_schedules").delete().eq("id", id);
-  if (tenantId) query = query.eq("tenant_id", tenantId);
+  const { data, error } = await db
+    .from("recurring_schedules")
+    .update({ is_active: false })
+    .eq("id", id)
+    .eq("tenant_id", tenantId)
+    .select("id")
+    .maybeSingle();
 
-  const { error, count } = await query;
   if (error) throw new Error(`[db] deleteRecurringSchedule: ${error.message}`);
-  return (count ?? 0) > 0;
+  return data !== null;
 }
