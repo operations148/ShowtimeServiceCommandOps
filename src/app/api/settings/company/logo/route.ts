@@ -1,10 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { requirePermission, getTenantId } from "@/lib/auth/api-auth";
 import { db } from "@/lib/db/client";
+import { validateAndReencodeImage } from "@/lib/security/file-validation";
 
 const LOGO_BUCKET = "logos";
 const MAX_SIZE_BYTES = 5 * 1024 * 1024;
-const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/svg+xml"]);
 
 // ---------------------------------------------------------------------------
 // POST /api/settings/company/logo
@@ -27,16 +27,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing file field" }, { status: 422 });
   }
 
-  if (!ALLOWED_TYPES.has(file.type)) {
-    return NextResponse.json({ error: "Unsupported file type. Use JPEG, PNG, WebP, or SVG." }, { status: 422 });
-  }
-  if (file.size > MAX_SIZE_BYTES) {
-    return NextResponse.json({ error: "File too large. Maximum size is 5 MB." }, { status: 422 });
+  // Magic-byte sniff + re-encode. SVG is deliberately no longer accepted here
+  // (security-audit M5) — it was previously whitelisted into a public bucket
+  // with no CSP and no sanitizer, and SVG can carry an embedded <script>.
+  const inputBuffer = Buffer.from(await file.arrayBuffer());
+  const validated = await validateAndReencodeImage(inputBuffer, { maxSizeBytes: MAX_SIZE_BYTES });
+  if (!validated.ok) {
+    return NextResponse.json({ error: validated.reason }, { status: 422 });
   }
 
-  const filename = file instanceof File ? file.name : `logo-${Date.now()}.png`;
-  const ext = filename.split(".").pop() ?? "png";
-  const path = `${tenantId}/${Date.now()}.${ext}`;
+  const path = `${tenantId}/${Date.now()}.${validated.image.ext}`;
 
   // Remove existing logos for this tenant
   const { data: existing } = await db.storage.from(LOGO_BUCKET).list(tenantId);
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
 
   const { error: uploadError } = await db.storage
     .from(LOGO_BUCKET)
-    .upload(path, file, { upsert: true, contentType: file.type });
+    .upload(path, validated.image.buffer, { upsert: true, contentType: validated.image.mime });
 
   if (uploadError) {
     console.error("[api] POST /api/settings/company/logo upload:", uploadError);

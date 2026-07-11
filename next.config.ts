@@ -41,7 +41,10 @@ const securityHeaders = [
 const nextConfig: NextConfig = withPWA({
   // pdfkit is CJS and reads internal font files via require() at runtime.
   // Keeping it external prevents webpack from mangling those require() paths.
-  serverExternalPackages: ["pdfkit"],
+  // sharp ships native (.node) bindings per-platform — bundling it can break
+  // on Vercel's serverless runtime if webpack tries to trace/copy the binary;
+  // externalizing it is the standard fix.
+  serverExternalPackages: ["pdfkit", "sharp"],
   images: {
     remotePatterns: [
       {

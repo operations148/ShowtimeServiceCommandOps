@@ -1,7 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { requireApiAuth } from "@/lib/auth/api-auth";
 import { db } from "@/lib/db/client";
-import { uploadAvatar, deleteAvatar, validateAvatarFile } from "@/lib/storage/avatars";
+import { uploadAvatar, deleteAvatar, AVATAR_MAX_SIZE_BYTES } from "@/lib/storage/avatars";
+import { validateAndReencodeImage } from "@/lib/security/file-validation";
 
 // ---------------------------------------------------------------------------
 // POST /api/profile/avatar
@@ -28,16 +29,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing file field" }, { status: 422 });
   }
 
-  const validationError = validateAvatarFile(file);
-  if (validationError) {
-    return NextResponse.json({ error: validationError }, { status: 422 });
+  const inputBuffer = Buffer.from(await file.arrayBuffer());
+  const validated = await validateAndReencodeImage(inputBuffer, { maxSizeBytes: AVATAR_MAX_SIZE_BYTES });
+  if (!validated.ok) {
+    return NextResponse.json({ error: validated.reason }, { status: 422 });
   }
-
-  const filename = file instanceof File ? file.name : `avatar-${Date.now()}.jpg`;
 
   let publicUrl: string;
   try {
-    publicUrl = await uploadAvatar(userId, file, filename);
+    publicUrl = await uploadAvatar(userId, validated.image.buffer, validated.image.mime, validated.image.ext);
   } catch (err) {
     console.error("[api] POST /api/profile/avatar upload:", err);
     return NextResponse.json({ error: "Upload failed. Please try again." }, { status: 500 });
