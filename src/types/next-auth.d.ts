@@ -16,6 +16,8 @@ declare module "next-auth" {
       /** For TECHNICIAN role — equals user.id in this schema. */
       technician_id?: string;
       avatar_url?: string | null;
+      /** Value at login time; compared against the DB on every request — see src/lib/auth/trusted-context.ts. */
+      session_version: number;
     };
   }
 
@@ -26,6 +28,7 @@ declare module "next-auth" {
     tenant_id: string;
     technician_id?: string;
     avatar_url?: string | null;
+    session_version: number;
   }
 }
 
@@ -37,5 +40,6 @@ declare module "next-auth/jwt" {
     tenant_id: string;
     technician_id?: string;
     avatar_url?: string | null;
+    session_version: number;
   }
 }

@@ -19,6 +19,24 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 ALTER TABLE users
   ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 1;
 
+CREATE OR REPLACE FUNCTION public.increment_session_version(
+  p_user_id UUID,
+  p_tenant_id UUID
+) RETURNS INTEGER
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_new_version INTEGER;
+BEGIN
+  UPDATE public.users
+    SET session_version = session_version + 1
+    WHERE id = p_user_id AND tenant_id = p_tenant_id
+    RETURNING session_version INTO v_new_version;
+  RETURN v_new_version;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.increment_session_version(UUID, UUID) TO service_role;
+
 -- ---------------------------------------------------------------------------
 -- 2. user_invitations — reconstructing the untracked table (security-audit M11)
 --

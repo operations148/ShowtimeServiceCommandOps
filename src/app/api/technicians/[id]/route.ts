@@ -3,6 +3,9 @@ import bcrypt from "bcryptjs";
 import { requireApiAuth, requirePermission, getTenantId } from "@/lib/auth/api-auth";
 import { db } from "@/lib/db/client";
 import { PatchTechnicianSchema } from "@/lib/validation/technician";
+import { bumpSessionVersion } from "@/lib/auth/trusted-context";
+import { recordAuditEvent } from "@/lib/security/audit";
+import { checkPasswordStrength } from "@/lib/security/password-policy";
 
 // ---------------------------------------------------------------------------
 // GET /api/technicians/[id]
@@ -70,7 +73,7 @@ export async function PATCH(
   // Verify technician belongs to this tenant
   const { data: existing } = await db
     .from("users")
-    .select("id, email")
+    .select("id, email, is_active")
     .eq("id", id)
     .eq("tenant_id", tenantId)
     .eq("role", "technician")
@@ -78,6 +81,13 @@ export async function PATCH(
 
   if (!existing) {
     return NextResponse.json({ error: "Technician not found" }, { status: 404 });
+  }
+
+  if (new_password) {
+    const strength = checkPasswordStrength(new_password);
+    if (!strength.ok) {
+      return NextResponse.json({ error: strength.reason }, { status: 422 });
+    }
   }
 
   // If email is changing, check for duplicates
@@ -116,6 +126,26 @@ export async function PATCH(
   if (updateError) {
     console.error("[api] PATCH /api/technicians/[id] error:", updateError.message);
     return NextResponse.json({ error: "Failed to update technician" }, { status: 500 });
+  }
+
+  if (is_active !== undefined || new_password) {
+    await bumpSessionVersion(id, tenantId);
+  }
+
+  if (is_active !== undefined && is_active !== existing.is_active) {
+    void recordAuditEvent({
+      tenantId, userId: auth.session.user.id,
+      actionType: is_active ? "user.reactivated" : "user.deactivated",
+      description: is_active ? "Reactivated technician" : "Deactivated technician",
+      entityType: "user", entityId: id,
+    });
+  }
+  if (new_password) {
+    void recordAuditEvent({
+      tenantId, userId: auth.session.user.id, actionType: "password.admin_reset",
+      description: "Admin reset technician password",
+      entityType: "user", entityId: id,
+    });
   }
 
   return NextResponse.json({ data: updated });

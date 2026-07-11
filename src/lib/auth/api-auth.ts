@@ -3,6 +3,10 @@ import type { Session } from "next-auth";
 import { getSession } from "./index";
 import { UserRole } from "@/types/technician";
 import { rolePermissions, type RolePermissions } from "@/config/roles";
+import { resolveTrustedContext, type TrustedContext } from "./trusted-context";
+import { isSameOriginRequest } from "@/lib/security/origin";
+import { newRequestId } from "@/lib/security/request-id";
+import { logger } from "@/lib/security/logger";
 
 export { getTenantId } from "./tenant";
 
@@ -10,7 +14,7 @@ export { getTenantId } from "./tenant";
 // Result types
 // ---------------------------------------------------------------------------
 
-export type ApiAuthOk   = { ok: true;  session: Session };
+export type ApiAuthOk   = { ok: true;  session: Session; context: TrustedContext };
 export type ApiAuthFail = { ok: false; response: NextResponse };
 export type ApiAuthResult = ApiAuthOk | ApiAuthFail;
 
@@ -29,23 +33,53 @@ function forbiddenResponse(msg = "Forbidden — insufficient permissions"): Next
   return NextResponse.json({ error: msg }, { status: 403 });
 }
 
+function crossOriginResponse(): NextResponse {
+  return NextResponse.json({ error: "Cross-origin request rejected" }, { status: 403 });
+}
+
 // ---------------------------------------------------------------------------
 // Core helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Requires a valid session.
- * Returns `{ ok: true, session }` or `{ ok: false, response: 401 }`.
+ * Requires a valid session AND re-validates it against the database on every
+ * call — the trusted authorization context (security-audit H2). A session
+ * whose user has been deactivated, had their role changed, or had their
+ * password changed since the JWT was issued is rejected immediately rather
+ * than remaining valid for the rest of its 8h maxAge.
+ *
+ * `session.user.tenant_id`/`role`/`technician_id` are overwritten with the
+ * fresh DB values before being returned, so every existing call site
+ * (`getTenantId(session)`, `session.user.role`, etc.) is automatically
+ * authorized against current data with no call-site changes required.
  *
  * Usage:
  *   const auth = await requireApiAuth();
  *   if (!auth.ok) return auth.response;
- *   const { session } = auth;
+ *   const { session, context } = auth;
  */
 export async function requireApiAuth(): Promise<ApiAuthResult> {
+  if (!(await isSameOriginRequest())) {
+    logger.warn("[auth] cross-origin request rejected");
+    return { ok: false, response: crossOriginResponse() };
+  }
+
   const session = await getSession();
   if (!session) return { ok: false, response: unauthResponse() };
-  return { ok: true, session };
+
+  const requestId = newRequestId();
+  const trusted = await resolveTrustedContext(session, requestId);
+  if (!trusted.ok) {
+    // Same generic message whether the account was deactivated, the role
+    // changed, or the session was never valid — don't leak which.
+    return { ok: false, response: unauthResponse() };
+  }
+
+  session.user.tenant_id = trusted.context.tenantId;
+  session.user.role = trusted.context.role;
+  session.user.technician_id = trusted.context.technicianId;
+
+  return { ok: true, session, context: trusted.context };
 }
 
 /**
