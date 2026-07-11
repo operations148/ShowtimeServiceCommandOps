@@ -37,7 +37,18 @@ export type AuditActionType =
   | "pricebook.item_archived"
   | "pricebook.item_restored"
   | "pricebook.bundle_updated"
-  | "pricebook.exported";
+  | "pricebook.exported"
+  // Estimates (Phase 3)
+  | "estimate.created"
+  | "estimate.updated"
+  | "estimate.sent"
+  | "estimate.send_failed"
+  | "estimate.accepted"
+  | "estimate.declined"
+  | "estimate.voided"
+  | "estimate.override"
+  | "estimate.converted"
+  | "estimate.token_revoked";
 
 export interface AuditEntry {
   tenantId: string;

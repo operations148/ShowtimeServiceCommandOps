@@ -40,6 +40,13 @@ export interface RolePermissions {
   canArchivePricebookItems: boolean;
   canViewItemCosts: boolean;
   canExportPricebook: boolean;
+
+  // Estimate documents (Phase 3). canSendEstimateEmail (Phase 1) already gates
+  // the manual send action; these add view/manage/void. Cost visibility on
+  // estimate lines rides canViewItemCosts (same rail as the pricebook).
+  canViewEstimates: boolean;
+  canManageEstimates: boolean;
+  canVoidEstimates: boolean;
 }
 
 export const rolePermissions: Record<UserRole, RolePermissions> = {
@@ -68,6 +75,9 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canArchivePricebookItems: true,
     canViewItemCosts: true,
     canExportPricebook: true,
+    canViewEstimates: true,
+    canManageEstimates: true,
+    canVoidEstimates: true,
   },
   [UserRole.TENANT_ADMIN]: {
     canViewAllWorkOrders: true,
@@ -94,6 +104,9 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canArchivePricebookItems: true,
     canViewItemCosts: true,
     canExportPricebook: true,
+    canViewEstimates: true,
+    canManageEstimates: true,
+    canVoidEstimates: true,
   },
   [UserRole.OFFICE_STAFF]: {
     canViewAllWorkOrders: true,
@@ -121,6 +134,10 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canArchivePricebookItems: true,
     canViewItemCosts: false,
     canExportPricebook: false,
+    // Office staff create/edit/send estimates but cannot void a live document.
+    canViewEstimates: true,
+    canManageEstimates: true,
+    canVoidEstimates: false,
   },
   [UserRole.TECHNICIAN]: {
     canViewAllWorkOrders: false,
@@ -149,6 +166,10 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canArchivePricebookItems: false,
     canViewItemCosts: false,
     canExportPricebook: false,
+    // No estimate surface for technicians in Phase 3.
+    canViewEstimates: false,
+    canManageEstimates: false,
+    canVoidEstimates: false,
   },
   [UserRole.READ_ONLY_OWNER]: {
     canViewAllWorkOrders: true,
@@ -176,5 +197,9 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canArchivePricebookItems: false,
     canViewItemCosts: true,
     canExportPricebook: true,
+    // Read-only owner can view estimates + activity but not create/send/void.
+    canViewEstimates: true,
+    canManageEstimates: false,
+    canVoidEstimates: false,
   },
 };

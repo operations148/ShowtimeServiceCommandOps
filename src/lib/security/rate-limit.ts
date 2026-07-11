@@ -35,6 +35,10 @@ export const RATE_LIMIT_POLICIES = {
   report:               { windowSeconds: 60,      max: 30 },
   webhook:              { windowSeconds: 60,      max: 120 },
   adminAction:          { windowSeconds: 60,      max: 60 },
+  // Public estimate route (unauthenticated) — keyed by IP + token. Views are
+  // more frequent than decisions; decisions are additionally one-shot by status.
+  publicEstimateView:   { windowSeconds: 60,      max: 30 },
+  publicEstimateDecision: { windowSeconds: 60 * 60, max: 10 },
 } as const satisfies Record<string, RateLimitPolicy>;
 
 export type RateLimitPolicyName = keyof typeof RATE_LIMIT_POLICIES;
