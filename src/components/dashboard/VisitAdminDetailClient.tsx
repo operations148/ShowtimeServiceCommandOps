@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { Loader2, UserPlus, CalendarClock, CheckCircle2, Camera, ClipboardList } from "lucide-react";
-import { VisitStatus, type VisitWithSchedule } from "@/types/visit";
+import type { VisitWithSchedule } from "@/types/visit";
 import type { ScheduleEvent } from "@/types/scheduling";
 import { rolePermissions } from "@/config/roles";
 import type { UserRole } from "@/types/technician";

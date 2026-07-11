@@ -7,7 +7,7 @@ import type { VisitWithSchedule } from "@/types/visit";
 import { VisitStatus } from "@/types/visit";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { ErrorState } from "@/components/ui/ErrorState";
-import { addDaysToDateStr, daysBetween, dayOfWeekOfDateStr } from "@/lib/scheduling/timezone";
+import { addDaysToDateStr, dayOfWeekOfDateStr } from "@/lib/scheduling/timezone";
 import { AssignVisitModal } from "./AssignVisitModal";
 import { RescheduleModal } from "./RescheduleModal";
 import { cn } from "@/lib/utils";
