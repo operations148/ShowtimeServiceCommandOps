@@ -78,7 +78,9 @@ export async function upsertPropertyFromGHL(
       return { outcome: "error", reason: "Property disappeared between lookup and update" };
     }
 
-    console.log(`${tag} Updated Property "${result.data.id}" (${result.data.customer_name}) tenant="${tenantId}"`);
+    // Log by ID only -- customer_name is PII and doesn't add debugging value
+    // once the property ID is present (security-audit M15).
+    console.log(`${tag} Updated Property "${result.data.id}" tenant="${tenantId}"`);
     return { outcome: "updated", property: result.data };
   }
 
@@ -112,6 +114,6 @@ export async function upsertPropertyFromGHL(
     tenantId
   );
 
-  console.log(`${tag} Created Property "${property.id}" (${property.customer_name}) tenant="${tenantId}"`);
+  console.log(`${tag} Created Property "${property.id}" tenant="${tenantId}"`);
   return { outcome: "created", property };
 }
