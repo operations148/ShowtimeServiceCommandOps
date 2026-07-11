@@ -45,31 +45,43 @@ function fmtDate(iso: string): string {
 const STATUS_LABEL: Record<WorkOrderStatus, string> = {
   [WorkOrderStatus.NEW]:             "New",
   [WorkOrderStatus.ASSIGNED]:        "Assigned",
+  [WorkOrderStatus.SCHEDULED]:       "Scheduled",
   [WorkOrderStatus.IN_PROGRESS]:     "In Progress",
+  [WorkOrderStatus.ON_HOLD]:         "On Hold",
   [WorkOrderStatus.COMPLETED]:       "Completed",
   [WorkOrderStatus.NEEDS_FOLLOW_UP]: "Needs Follow-up",
   [WorkOrderStatus.ESTIMATE_NEEDED]: "Estimate Needed",
+  [WorkOrderStatus.CLOSED]:          "Closed",
   [WorkOrderStatus.CANCELLED]:       "Cancelled",
+  [WorkOrderStatus.ARCHIVED]:        "Archived",
 };
 
 const STATUS_DOT: Record<WorkOrderStatus, string> = {
   [WorkOrderStatus.NEW]:             "bg-slate-400",
   [WorkOrderStatus.ASSIGNED]:        "bg-blue-500",
+  [WorkOrderStatus.SCHEDULED]:       "bg-indigo-500",
   [WorkOrderStatus.IN_PROGRESS]:     "bg-brand-500",
+  [WorkOrderStatus.ON_HOLD]:         "bg-amber-500",
   [WorkOrderStatus.COMPLETED]:       "bg-emerald-500",
   [WorkOrderStatus.NEEDS_FOLLOW_UP]: "bg-orange-400",
   [WorkOrderStatus.ESTIMATE_NEEDED]: "bg-amber-400",
+  [WorkOrderStatus.CLOSED]:          "bg-violet-400",
   [WorkOrderStatus.CANCELLED]:       "bg-slate-200",
+  [WorkOrderStatus.ARCHIVED]:        "bg-slate-300",
 };
 
 const STATUS_BAR: Record<WorkOrderStatus, string> = {
   [WorkOrderStatus.NEW]:             "bg-slate-300",
   [WorkOrderStatus.ASSIGNED]:        "bg-blue-400",
+  [WorkOrderStatus.SCHEDULED]:       "bg-indigo-400",
   [WorkOrderStatus.IN_PROGRESS]:     "bg-brand-500",
+  [WorkOrderStatus.ON_HOLD]:         "bg-amber-500",
   [WorkOrderStatus.COMPLETED]:       "bg-emerald-500",
   [WorkOrderStatus.NEEDS_FOLLOW_UP]: "bg-orange-400",
   [WorkOrderStatus.ESTIMATE_NEEDED]: "bg-amber-400",
+  [WorkOrderStatus.CLOSED]:          "bg-violet-500",
   [WorkOrderStatus.CANCELLED]:       "bg-slate-200",
+  [WorkOrderStatus.ARCHIVED]:        "bg-slate-300",
 };
 
 const CATEGORY_LABEL: Record<ServiceCategory, string> = {

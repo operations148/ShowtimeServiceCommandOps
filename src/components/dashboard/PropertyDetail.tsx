@@ -88,11 +88,15 @@ const POOL_SHAPE_LABELS: Record<PoolShape, string> = {
 const WO_STATUS: Record<WorkOrderStatus, { label: string; cls: string }> = {
   [WorkOrderStatus.NEW]:             { label: "New",             cls: "bg-slate-100 text-slate-600" },
   [WorkOrderStatus.ASSIGNED]:        { label: "Assigned",        cls: "bg-blue-50 text-blue-700" },
+  [WorkOrderStatus.SCHEDULED]:       { label: "Scheduled",       cls: "bg-indigo-50 text-indigo-700" },
   [WorkOrderStatus.IN_PROGRESS]:     { label: "In Progress",     cls: "bg-brand-50 text-brand-700" },
+  [WorkOrderStatus.ON_HOLD]:         { label: "On Hold",         cls: "bg-amber-50 text-amber-700" },
   [WorkOrderStatus.COMPLETED]:       { label: "Completed",       cls: "bg-emerald-50 text-emerald-700" },
   [WorkOrderStatus.NEEDS_FOLLOW_UP]: { label: "Needs Follow-Up", cls: "bg-orange-50 text-orange-700" },
   [WorkOrderStatus.ESTIMATE_NEEDED]: { label: "Estimate Needed", cls: "bg-amber-50 text-amber-700" },
+  [WorkOrderStatus.CLOSED]:          { label: "Closed",          cls: "bg-violet-50 text-violet-700" },
   [WorkOrderStatus.CANCELLED]:       { label: "Cancelled",       cls: "bg-red-50 text-red-500" },
+  [WorkOrderStatus.ARCHIVED]:        { label: "Archived",        cls: "bg-slate-100 text-slate-400" },
 };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────

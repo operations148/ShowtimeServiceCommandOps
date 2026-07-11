@@ -66,6 +66,23 @@ type WoJoinedRow = {
   tech_completion_message: string | null;
   tech_completed_by: string | null;
   tech_completed_at: string | null;
+  // Phase 5 project/archive columns (nullable/defaulted — older rows predate them)
+  parent_work_order_id: string | null;
+  is_multi_day: boolean | null;
+  budget_cents: number | null;
+  approved_contract_amount_cents: number | null;
+  actual_cost_cents: number | null;
+  customer_notes: string | null;
+  internal_notes: string | null;
+  cancellation_reason: string | null;
+  archived_at: string | null;
+  archived_by: string | null;
+  closed_at: string | null;
+  closed_by: string | null;
+  reopened_at: string | null;
+  reopen_count: number | null;
+  checklist_template_id: string | null;
+  version: number | null;
   created_at: string;
   updated_at: string;
   // Embedded joins
@@ -100,6 +117,22 @@ function mapRow(row: WoJoinedRow): WorkOrderWithRelations {
     tech_completion_message: row.tech_completion_message,
     tech_completed_by:       row.tech_completed_by,
     tech_completed_at:       nullToUndef(row.tech_completed_at),
+    parent_work_order_id:    row.parent_work_order_id ?? null,
+    is_multi_day:            row.is_multi_day ?? false,
+    budget_cents:            row.budget_cents ?? null,
+    approved_contract_amount_cents: row.approved_contract_amount_cents ?? 0,
+    actual_cost_cents:       row.actual_cost_cents ?? 0,
+    customer_notes:          row.customer_notes ?? null,
+    internal_notes:          row.internal_notes ?? null,
+    cancellation_reason:     row.cancellation_reason ?? null,
+    archived_at:             row.archived_at ?? null,
+    archived_by:             row.archived_by ?? null,
+    closed_at:               row.closed_at ?? null,
+    closed_by:               row.closed_by ?? null,
+    reopened_at:             row.reopened_at ?? null,
+    reopen_count:            row.reopen_count ?? 0,
+    checklist_template_id:   row.checklist_template_id ?? null,
+    version:                 row.version ?? 1,
     created_at:              row.created_at,
     updated_at:              row.updated_at,
     // Computed relation fields
