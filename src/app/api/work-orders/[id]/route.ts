@@ -4,7 +4,7 @@ import { PatchWorkOrderSchema } from "@/lib/validation/work-order";
 import {
   getWorkOrderById,
   updateWorkOrder,
-  deleteWorkOrder,
+  archiveWorkOrder,
 } from "@/lib/db/queries/work-orders";
 import { WorkOrderStatus, EstimateHandoffStatus } from "@/types/work-order";
 import { UserRole } from "@/types/technician";
@@ -247,37 +247,29 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 // ---------------------------------------------------------------------------
 // DELETE /api/work-orders/[id]
 //
-// TECHNICIAN / READ_ONLY_OWNER: blocked (canCreateWorkOrders: false).
-// tenantId is passed to deleteWorkOrder for defense-in-depth.
+// Phase 5: archives instead of hard-deleting (business records are never
+// physically removed). TECHNICIAN / READ_ONLY_OWNER: blocked
+// (canCreateWorkOrders: false). tenantId is passed to archiveWorkOrder for
+// defense-in-depth.
 // ---------------------------------------------------------------------------
 
 export async function DELETE(_request: NextRequest, { params }: RouteContext) {
   const auth = await requirePermission("canCreateWorkOrders");
   if (!auth.ok) return auth.response;
   const tenantId = getTenantId(auth.session);
+  const userId = auth.session.user.id;
 
   const { id } = await params;
 
-  let workOrder;
+  let result;
   try {
-    workOrder = await getWorkOrderById(id, tenantId);
-  } catch (err) {
-    console.error("[api] DELETE /api/work-orders/[id] pre-check failed:", err);
-    return NextResponse.json({ error: "Failed to load work order" }, { status: 500 });
-  }
-  if (!workOrder) {
-    return NextResponse.json({ error: `Work order "${id}" not found` }, { status: 404 });
-  }
-
-  let deleted;
-  try {
-    deleted = await deleteWorkOrder(id, tenantId);
+    result = await archiveWorkOrder(id, tenantId, userId);
   } catch (err) {
     console.error("[api] DELETE /api/work-orders/[id] failed:", err);
-    return NextResponse.json({ error: "Failed to delete work order" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to archive work order" }, { status: 500 });
   }
-  if (!deleted) {
+  if (!result.ok) {
     return NextResponse.json({ error: `Work order "${id}" not found` }, { status: 404 });
   }
-  return NextResponse.json({ data: { id, deleted: true } });
+  return NextResponse.json({ data: { id, archived: true } });
 }

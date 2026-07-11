@@ -114,6 +114,29 @@ export const PatchWorkOrderSchema = z.object({
   tech_completed_by:       z.string().max(200).optional(),
   tech_completed_at:       z.string().optional(),
 
+  // Phase 5 project fields. Sensitive lifecycle fields (archived_at, version,
+  // closed_at/by, reopened_at, reopen_count, approved_contract_amount_cents)
+  // are deliberately NOT accepted here — Zod strips any unknown key, so they
+  // can only be set via the dedicated archive/restore/close/reopen actions
+  // and change-order acceptance, never a generic PATCH.
+  parent_work_order_id: z
+    .string()
+    .uuid("Invalid parent work order ID")
+    .optional()
+    .or(z.literal(""))
+    .transform((v) => (v === "" ? undefined : v)),
+  is_multi_day: z.boolean().optional(),
+  budget_cents: z.number().int().min(0).optional(),
+  customer_notes: z.string().max(5000).optional().or(z.literal("")).transform((v) => (v === "" ? undefined : v)),
+  internal_notes: z.string().max(5000).optional().or(z.literal("")).transform((v) => (v === "" ? undefined : v)),
+  cancellation_reason: z.string().max(1000).optional().or(z.literal("")).transform((v) => (v === "" ? undefined : v)),
+  checklist_template_id: z
+    .string()
+    .uuid("Invalid checklist template ID")
+    .optional()
+    .or(z.literal(""))
+    .transform((v) => (v === "" ? undefined : v)),
+
   // Allows TENANT_ADMIN / PLATFORM_OWNER to mutate a locked estimate handoff
   override: z.boolean().optional(),
 });
