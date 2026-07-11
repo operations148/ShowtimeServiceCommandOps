@@ -115,3 +115,44 @@ describe("scheduling permission matrix (Phase 4)", () => {
     }
   });
 });
+
+describe("work-order project + change-order permission matrix (Phase 5)", () => {
+  it("technicians have no project-management or change-order surface", () => {
+    const p = rolePermissions[UserRole.TECHNICIAN];
+    expect(p.canCloseWorkOrders).toBe(false);
+    expect(p.canManageWorkOrderTasks).toBe(false);
+    expect(p.canManageWorkOrderAttachments).toBe(false);
+    expect(p.canViewChangeOrders).toBe(false);
+    expect(p.canManageChangeOrders).toBe(false);
+    expect(p.canOverrideChangeOrderLock).toBe(false);
+  });
+
+  it("office staff run day-to-day project ops but cannot void or override a change order", () => {
+    const p = rolePermissions[UserRole.OFFICE_STAFF];
+    expect(p.canCloseWorkOrders).toBe(true);
+    expect(p.canManageWorkOrderTasks).toBe(true);
+    expect(p.canViewChangeOrders).toBe(true);
+    expect(p.canManageChangeOrders).toBe(true);
+    expect(p.canVoidChangeOrders).toBe(false);
+    expect(p.canOverrideChangeOrderLock).toBe(false);
+    expect(p.canManageCompletionRequirements).toBe(false);
+  });
+
+  it("read-only owner can view change orders but manage nothing", () => {
+    const p = rolePermissions[UserRole.READ_ONLY_OWNER];
+    expect(p.canViewChangeOrders).toBe(true);
+    expect(p.canManageChangeOrders).toBe(false);
+    expect(p.canCloseWorkOrders).toBe(false);
+  });
+
+  it("tenant admin and platform owner have full control including override and completion-requirement config", () => {
+    for (const role of [UserRole.TENANT_ADMIN, UserRole.PLATFORM_OWNER]) {
+      const p = rolePermissions[role];
+      expect(p.canCloseWorkOrders).toBe(true);
+      expect(p.canManageChangeOrders).toBe(true);
+      expect(p.canVoidChangeOrders).toBe(true);
+      expect(p.canOverrideChangeOrderLock).toBe(true);
+      expect(p.canManageCompletionRequirements).toBe(true);
+    }
+  });
+});

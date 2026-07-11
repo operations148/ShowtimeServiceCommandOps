@@ -11,6 +11,7 @@ import { UserRole } from "@/types/technician";
 import { syncCompletionToGhl } from "@/lib/ghl/sync-completion";
 import { requireApiAuth, requirePermission, isTechnicianScoped, getTenantId } from "@/lib/auth/api-auth";
 import { db } from "@/lib/db/client";
+import { recordAuditEvent } from "@/lib/security/audit";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -271,5 +272,15 @@ export async function DELETE(_request: NextRequest, { params }: RouteContext) {
   if (!result.ok) {
     return NextResponse.json({ error: `Work order "${id}" not found` }, { status: 404 });
   }
+
+  await recordAuditEvent({
+    tenantId,
+    userId,
+    actionType: "work_order.archived",
+    description: `Archived work order ${result.data.wo_number}`,
+    entityType: "work_order",
+    entityId: id,
+  });
+
   return NextResponse.json({ data: { id, archived: true } });
 }

@@ -58,7 +58,34 @@ export type AuditActionType =
   | "blocked_time.deleted"
   | "recurring.paused"
   | "recurring.resumed"
-  | "recurring.occurrence_skipped";
+  | "recurring.occurrence_skipped"
+  // Work-order project expansion (Phase 5)
+  | "work_order.archived"
+  | "work_order.restored"
+  | "work_order.closed"
+  | "work_order.reopened"
+  | "work_order.cancelled"
+  | "work_order_task.created"
+  | "work_order_task.updated"
+  | "work_order_task.deleted"
+  | "work_order_attachment.uploaded"
+  | "work_order_attachment.deleted"
+  | "checklist_template.created"
+  | "checklist_template.updated"
+  | "checklist_template.archived"
+  | "completion_requirement_rule.updated"
+  // Change orders (Phase 5)
+  | "change_order.created"
+  | "change_order.updated"
+  | "change_order.sent"
+  | "change_order.send_failed"
+  | "change_order.accepted"
+  | "change_order.rejected"
+  | "change_order.voided"
+  | "change_order.override"
+  | "change_order.contract_value_applied"
+  | "change_order.schedule_impact_applied"
+  | "change_order.token_revoked";
 
 export interface AuditEntry {
   tenantId: string;
