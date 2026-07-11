@@ -29,6 +29,17 @@ export interface RolePermissions {
   canInviteTeamMembers: boolean;
   canChangeTeamRoles: boolean;
   canReadAuditLog: boolean;
+
+  // Pricebook permissions (Phase 2). canViewItemCosts guards internal_cost —
+  // it is stripped server-side (src/lib/pricebook/cost-visibility.ts) for
+  // roles without it; technicians and customer-portal users must never see
+  // margins.
+  canViewPricebook: boolean;
+  canCreatePricebookItems: boolean;
+  canEditPricebookItems: boolean;
+  canArchivePricebookItems: boolean;
+  canViewItemCosts: boolean;
+  canExportPricebook: boolean;
 }
 
 export const rolePermissions: Record<UserRole, RolePermissions> = {
@@ -51,6 +62,12 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canInviteTeamMembers: true,
     canChangeTeamRoles: true,
     canReadAuditLog: true,
+    canViewPricebook: true,
+    canCreatePricebookItems: true,
+    canEditPricebookItems: true,
+    canArchivePricebookItems: true,
+    canViewItemCosts: true,
+    canExportPricebook: true,
   },
   [UserRole.TENANT_ADMIN]: {
     canViewAllWorkOrders: true,
@@ -71,6 +88,12 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canInviteTeamMembers: true,
     canChangeTeamRoles: true,
     canReadAuditLog: true,
+    canViewPricebook: true,
+    canCreatePricebookItems: true,
+    canEditPricebookItems: true,
+    canArchivePricebookItems: true,
+    canViewItemCosts: true,
+    canExportPricebook: true,
   },
   [UserRole.OFFICE_STAFF]: {
     canViewAllWorkOrders: true,
@@ -91,6 +114,13 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canInviteTeamMembers: false,
     canChangeTeamRoles: false,
     canReadAuditLog: false,
+    // Office staff build estimates from the pricebook but do not see margins.
+    canViewPricebook: true,
+    canCreatePricebookItems: true,
+    canEditPricebookItems: true,
+    canArchivePricebookItems: true,
+    canViewItemCosts: false,
+    canExportPricebook: false,
   },
   [UserRole.TECHNICIAN]: {
     canViewAllWorkOrders: false,
@@ -111,6 +141,14 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canInviteTeamMembers: false,
     canChangeTeamRoles: false,
     canReadAuditLog: false,
+    // Technicians have no pricebook surface in Phase 2; revisit when Phase 3
+    // estimate-building reaches the tech mobile view (ADR-0006).
+    canViewPricebook: false,
+    canCreatePricebookItems: false,
+    canEditPricebookItems: false,
+    canArchivePricebookItems: false,
+    canViewItemCosts: false,
+    canExportPricebook: false,
   },
   [UserRole.READ_ONLY_OWNER]: {
     canViewAllWorkOrders: true,
@@ -131,5 +169,12 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canInviteTeamMembers: false,
     canChangeTeamRoles: false,
     canReadAuditLog: false,
+    // The owner sees everything read-only, including costs and exports.
+    canViewPricebook: true,
+    canCreatePricebookItems: false,
+    canEditPricebookItems: false,
+    canArchivePricebookItems: false,
+    canViewItemCosts: true,
+    canExportPricebook: true,
   },
 };
