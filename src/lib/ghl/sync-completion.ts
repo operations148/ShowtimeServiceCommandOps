@@ -12,7 +12,7 @@
 import type { WorkOrderWithRelations } from "@/types/work-order";
 import { updateWorkOrder } from "@/lib/db/queries/work-orders";
 import { updateOpportunity } from "./client";
-import { enqueueGhlSync } from "./retry-queue";
+import { enqueueGhlSync } from "./sync-outbox";
 
 export async function syncCompletionToGhl(
   workOrder: WorkOrderWithRelations
@@ -55,8 +55,9 @@ export async function syncCompletionToGhl(
     `error: ${result.error}`
   );
 
-  // Enqueue for future retry (production: persistent queue + background worker).
-  enqueueGhlSync({
+  // Enqueue for durable retry (ghl_sync_outbox table, drained by
+  // /api/cron/drain-ghl-outbox — see src/lib/ghl/sync-outbox.ts).
+  await enqueueGhlSync({
     type: "opportunity_won",
     ghl_opportunity_id: workOrder.ghl_opportunity_id,
     work_order_id: workOrder.id,

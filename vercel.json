@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/generate-visits",
       "schedule": "0 6 * * 1"
+    },
+    {
+      "path": "/api/cron/drain-ghl-outbox",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

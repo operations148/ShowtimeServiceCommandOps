@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHmac, createHash, timingSafeEqual } from "crypto";
 import type {
   GHLWebhookPayload,
   GHLOpportunityStatusChangePayload,
@@ -17,6 +17,7 @@ import {
   STAGES_THAT_FLAG_ESTIMATE,
 } from "@/lib/constants/ghl-pipeline";
 import { resolveTenantId } from "@/lib/ghl/tenant-config";
+import { db } from "@/lib/db/client";
 
 // ---------------------------------------------------------------------------
 // Request verification — supports two modes:
@@ -56,6 +57,15 @@ interface VerifyResult {
   reason?: string;
 }
 
+// Constant-time string compare (security-audit L1 — the bearer/query paths
+// previously used plain `===`, unlike the HMAC path's timingSafeEqual).
+function constantTimeStringEquals(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf8");
+  const bufB = Buffer.from(b, "utf8");
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
 function verifyRequest(request: NextRequest, rawBody: string, secret: string): VerifyResult {
   const secretTrimmed = secret.trim();
 
@@ -68,15 +78,12 @@ function verifyRequest(request: NextRequest, rawBody: string, secret: string): V
     const headerLower = authHeader.toLowerCase();
     if (headerLower.startsWith(bearerPrefix)) {
       const tokenFromHeader = authHeader.slice(bearerPrefix.length).trim();
-      if (tokenFromHeader === secretTrimmed) {
+      if (constantTimeStringEquals(tokenFromHeader, secretTrimmed)) {
         return { ok: true, mode: "bearer" };
       }
-      // Header present but token doesn't match
-      return {
-        ok: false,
-        mode: "none",
-        reason: `bearer_mismatch | headerTokenLen=${tokenFromHeader.length} secretLen=${secretTrimmed.length} firstCharMatch=${tokenFromHeader[0] === secretTrimmed[0]}`,
-      };
+      // Header present but token doesn't match — no length/char-match detail
+      // in the reason string (security-audit M14 leaked secret metadata here).
+      return { ok: false, mode: "none", reason: "bearer_mismatch" };
     }
     // Authorization header present but not Bearer format
     return {
@@ -86,17 +93,17 @@ function verifyRequest(request: NextRequest, rawBody: string, secret: string): V
     };
   }
 
-  // Mode 1b: Token in query string (fallback when custom headers not available)
-  const urlToken = (request.nextUrl.searchParams.get("token") ?? "").trim();
-  if (urlToken) {
-    if (urlToken === secretTrimmed) {
-      return { ok: true, mode: "query" };
+  // Mode 1b: Token in query string — disabled in production (security-audit
+  // "disable query-token authentication in production": a token in the URL
+  // is logged by proxies/browsers/access logs far more readily than a header).
+  if (process.env.NODE_ENV !== "production") {
+    const urlToken = (request.nextUrl.searchParams.get("token") ?? "").trim();
+    if (urlToken) {
+      if (constantTimeStringEquals(urlToken, secretTrimmed)) {
+        return { ok: true, mode: "query" };
+      }
+      return { ok: false, mode: "none", reason: "query_token_mismatch" };
     }
-    return {
-      ok: false,
-      mode: "none",
-      reason: `query_token_mismatch | tokenLen=${urlToken.length} secretLen=${secretTrimmed.length}`,
-    };
   }
 
   // Mode 2: HMAC signature header (GHL Marketplace webhooks, future)
@@ -106,7 +113,7 @@ function verifyRequest(request: NextRequest, rawBody: string, secret: string): V
     return ok ? { ok: true, mode: "hmac" } : { ok: false, mode: "none", reason: "hmac_mismatch" };
   }
 
-  return { ok: false, mode: "none", reason: "no_auth_provided | no Authorization header, ?token param, or x-ghl-signature" };
+  return { ok: false, mode: "none", reason: "no_auth_provided" };
 }
 
 // ---------------------------------------------------------------------------
@@ -195,6 +202,33 @@ export async function POST(request: NextRequest) {
     if (!result.ok) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+  }
+
+  // ── Idempotency — dedupe an exact-byte redelivery of the same payload ──────
+  // GHL doesn't send a stable event ID on Custom Webhook deliveries, so a hash
+  // of the verified raw body is used as a best-effort dedup key (defense in
+  // depth on top of the business-level idempotency the factory functions
+  // already provide via unique constraints on ghl_opportunity_id).
+  const payloadHash = createHash("sha256").update(rawBody, "utf8").digest("hex");
+  const { data: existingEvent } = await db
+    .from("webhook_events")
+    .select("id, processing_status")
+    .eq("provider", "ghl")
+    .eq("event_id", payloadHash)
+    .maybeSingle();
+
+  if (existingEvent?.processing_status === "done") {
+    console.log("[ghl/webhooks] duplicate delivery — already processed, skipping");
+    return NextResponse.json({ received: true, duplicate: true }, { status: 200 });
+  }
+
+  if (!existingEvent) {
+    await db.from("webhook_events").insert({
+      provider: "ghl",
+      event_id: payloadHash,
+      payload_hash: payloadHash,
+      processing_status: "processing",
+    });
   }
 
   // ── Parse payload ──────────────────────────────────────────────────────────
@@ -307,8 +341,12 @@ export async function POST(request: NextRequest) {
   // and always return 200 so GHL never retries due to a processing error.
   try {
     await dispatch(payload);
+    await db.from("webhook_events").update({ processing_status: "done", processed_at: new Date().toISOString() })
+      .eq("provider", "ghl").eq("event_id", payloadHash);
   } catch (err) {
     console.error("[ghl/webhooks] Unhandled dispatch error:", err);
+    await db.from("webhook_events").update({ processing_status: "error", last_error: String(err) })
+      .eq("provider", "ghl").eq("event_id", payloadHash);
   }
 
   return NextResponse.json({ received: true }, { status: 200 });

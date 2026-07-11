@@ -26,8 +26,7 @@ export type AuditActionType =
   | "file.uploaded"
   | "file.deleted"
   | "ghl.credential_replaced"
-  | "report.exported"
-  | "cron.missing_secret";
+  | "report.exported";
 
 export interface AuditEntry {
   tenantId: string;
