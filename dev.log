@@ -1,0 +1,24 @@
+
+> serviceops-ghl-workorders@0.1.0 dev
+> next dev
+
+ ⚠ Port 3000 is in use by process 14248, using available port 3001 instead.
+   ▲ Next.js 15.5.15
+   - Local:        http://localhost:3001
+   - Network:      http://192.168.1.232:3001
+   - Environments: .env.local
+
+ ✓ Starting...
+> [PWA ○ Compiling /api/ghl/test-connection ...
+ ✓ Compiled /api/ghl/test-conne   Reload env: .env.local
+)
+ GET /api/ghl/test-connection 401 in 7817ms
+ GET /api/ghl/test-connection 401 in 53ms
+ ✓ Compiled in 123ms (102 modules)
+ GET /api/ghl/test-connection 200 in 377ms
+ GET /api/ghl/test-connection 200 in 356ms
+ ✓ Compiled in 120ms (102 modules)
+ GET /api/ghl/test-connection 200 in 428ms
+   Reload env: .env.local
+ ✓ Compiled in 166ms (195 modules)
+ ✓ Compiled in 66ms (195 modules)

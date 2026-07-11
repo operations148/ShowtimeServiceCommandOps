@@ -1,6 +1,7 @@
 import { db } from '@/lib/db/client'
 import { Invoice, InvoiceStatus, INVOICE_STATUS_TRANSITIONS } from '@/types/invoice'
 import type { CreateInvoiceInput, PatchInvoiceInput } from '@/lib/validation/invoice'
+import { nextDocumentNumber } from './document-numbers'
 
 // ─── Raw DB row ────────────────────────────────────────────────────────────────
 
@@ -117,16 +118,8 @@ export async function createInvoice(
   input: CreateInvoiceInput,
   tenantId: string,
 ): Promise<Invoice> {
-  // Generate sequential invoice number — tenant-scoped, optimistic (race-safe
-  // enough for low-volume ops; replace with a DB sequence when needed)
-  const { count, error: countError } = await db
-    .from('invoices')
-    .select('*', { count: 'exact', head: true })
-    .eq('tenant_id', tenantId)
-
-  if (countError) throw new Error(`[db] createInvoice count: ${countError.message}`)
-
-  const invoiceNumber = `INV-${String((count ?? 0) + 1).padStart(4, '0')}`
+  // Tenant-scoped, transaction-safe sequence (Phase 2) — replaces COUNT(*)+1
+  const invoiceNumber = await nextDocumentNumber(tenantId, 'invoice')
 
   const { data, error } = await db
     .from('invoices')

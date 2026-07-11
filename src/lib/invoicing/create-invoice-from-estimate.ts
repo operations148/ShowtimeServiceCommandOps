@@ -1,5 +1,7 @@
 import { db } from '@/lib/db/client'
 import { getInvoiceByEstimateHandoffId } from '@/lib/db/queries/invoices'
+import { nextDocumentNumber } from '@/lib/db/queries/document-numbers'
+import { depositAmount } from '@/lib/money/money'
 import { Invoice, InvoiceStatus } from '@/types/invoice'
 
 // ─── Result union ─────────────────────────────────────────────────────────────
@@ -164,19 +166,14 @@ export async function createInvoiceFromEstimate(
 
     // ── 2. Compute deposit (10 % floor, rounded to nearest cent) ─────────
     const depositPercent      = 10
-    const depositAmountCents  = Math.round(opts.total_cents * 0.10)
+    const depositAmountCents  = depositAmount(opts.total_cents, depositPercent)
     const subtotal            = opts.subtotal_cents        ?? opts.total_cents
     const taxRate             = opts.tax_rate              ?? 0
     const taxAmount           = opts.tax_amount_cents      ?? 0
     const discountAmount      = opts.discount_amount_cents ?? 0
 
-    // ── 3. Tenant-scoped sequential invoice number (INV-XXXX) ────────────
-    const { count, error: countError } = await db
-      .from('invoices')
-      .select('*', { count: 'exact', head: true })
-      .eq('tenant_id', tenantId)
-    if (countError) throw new Error(`count: ${countError.message}`)
-    const invoiceNumber = `INV-${String((count ?? 0) + 1).padStart(4, '0')}`
+    // ── 3. Tenant-scoped, transaction-safe invoice number (Phase 2) ──────
+    const invoiceNumber = await nextDocumentNumber(tenantId, 'invoice')
 
     // ── 4. Insert — status = deposit_due, snapshot the locked estimate ───
     const now = new Date().toISOString()
