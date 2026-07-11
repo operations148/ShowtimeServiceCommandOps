@@ -39,3 +39,13 @@ next-env.d.ts
 coverage/
 
 .vercel
+
+# Dev server log
+dev.log
+
+# Generated PWA service worker (next-pwa build output)
+public/sw.js
+public/workbox-*.js
+
+# Supabase CLI temp
+supabase/.temp/
