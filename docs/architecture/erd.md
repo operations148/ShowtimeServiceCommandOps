@@ -204,6 +204,14 @@ New tables (see `database-blueprint/estimates.md`): **estimates** (full financia
 
 The pre-existing `estimate_handoffs` table (technician "needs estimate" flag) is **untouched** — Phase 3 adds the document layer alongside it (optionally linked via `estimates.estimate_handoff_id`), so no technician-flagged data is lost. First unauthenticated surface in the app: `/estimate/[token]` + `/api/public/estimates/*` (token is the credential; strict output redaction; see ADR-0007).
 
+## Phase 4 additions (migration 20260712000001)
+
+New enums (informal — these are TEXT CHECK columns, not PG enums): visit `ghl_sync_state` (none|linked|pending|synced|failed), `visit_assignments.role` (lead|assistant), `schedule_events.event_type`, `cron_runs.status`.
+
+New tables (see `database-blueprint/scheduling.md`): **visit_assignments** (multi-technician; lead mirrored on `visits.technician_id`), **blocked_time** (technician holds, UTC), **technician_availability** (weekly wall-time template), **recurring_exceptions** (skip dates), **schedule_events** (append-only assignment/schedule audit), **cron_runs** (cron observability, deny-all RLS). `tenants` gained `timezone` (IANA). `visits` gained scheduling columns (planned times UTC, arrival window local, duration, travel buffer, all-day, route order, version, GHL appt ref + sync state). `recurring_schedules` gained duration/arrival-window/checklist-template/paused_at/version/notes.
+
+Idempotency: `UNIQUE(recurring_schedule_id, scheduled_date)` on work_orders makes recurring generation duplicate-proof. The optional `idx_visits_one_active_per_wo` was **dropped** (multi-day projects need parallel visits per work order). Timezone/recurrence/conflict logic is pure and tested (`src/lib/scheduling/*`); GHL owns original booking, ServiceOps owns operational scheduling (ADR-0009).
+
 ## Duplicate/conflicting type definitions (flagged for Phase 2)
 
 Two entirely separate, incompatible domain models both claim the name "Invoice":

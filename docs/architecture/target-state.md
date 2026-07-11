@@ -22,7 +22,7 @@ ServiceOps Command Center is a GHL-integrated field-operations SaaS where:
 | Pricebook (catalog, permissions, cost redaction, UI) | ✅ Phase 2 | `specs/pricebook.md`, ADR-0006 |
 | Line-item snapshot foundation | ✅ Phase 2 | `src/lib/documents/line-item-snapshot.ts` |
 | Full estimates/proposals + secure customer approval | ✅ Phase 3 | `src/lib/estimates/*`, `specs/estimates.md`, ADR-0007/0008 |
-| Scheduling/dispatch upgrades | Phase 4 | |
+| Dispatch, calendar, visit admin, durable recurring work | ✅ Phase 4 | `src/lib/scheduling/*`, `specs/dispatch-and-scheduling.md`, ADR-0009 |
 | Invoicing + payments (activate the orphaned backend) | Phase 5 | estimate acceptance already materialises a DRAFT invoice (idempotent); Phase 5 adds sending/deposit/payment + UI |
 | Job costing + profitability | Phase 6 | needs `unit_cost` snapshots from Phase 2 |
 | Customer portal | Phase 7 | can reuse the Phase 3 public-token pattern (ADR-0007) as its baseline; re-run RLS decision then |
@@ -37,3 +37,4 @@ ServiceOps Command Center is a GHL-integrated field-operations SaaS where:
 3. **Cost fields ride the `canViewItemCosts` rail** — any new surface returning `internal_cost`/`unit_cost` passes through cost redaction before serialization.
 4. **RLS stays "designed but unreachable" until a deliberate phase makes it reachable** (Supabase Auth or `SET LOCAL` session vars — Phase 7 or 11 decision). Until then application-layer tenancy (`tenant_id` on every query + trusted context) is the enforced boundary; new tables still ship RLS policies so the switch is a flip, not a retrofit.
 5. **Additive migrations only**; the fresh-environment provisioning gap (migration 019 assumes a dashboard-created table) is closed by a live schema dump, not by rewriting applied migrations.
+6. **All schedule time math goes through `src/lib/scheduling/timezone.ts`** (UTC storage, tenant-local display, calendar dates as strings); new `new Date(dateStr)`-in-local-time code is a review-blocking smell (ADR-0009). GHL owns original booking; ServiceOps owns operational scheduling.

@@ -29,6 +29,9 @@ For every resource type, log in as a Tenant A user and attempt to access a Tenan
 | Pricebook export (Phase 2) | `GET /api/pricebook/export` as Tenant A | CSV contains only Tenant A rows — verify no Tenant B item names appear |
 | Estimate document (Phase 3) | `GET/PATCH /api/estimates/[id]`, `POST .../transition\|send\|override\|revoke-token`, `GET .../versions\|activity\|pdf` | 404 |
 | Public estimate token (Phase 3) | `GET/POST /api/public/estimates/[token]` with a Tenant B token while probing as Tenant A | Resolves ONLY to Tenant B's estimate (token is the credential; tenant derived from the row, never the caller). No Tenant A data ever returned. Invalid token → one generic 404. |
+| Visit schedule (Phase 4) | `POST /api/visits/[id]/assign\|reschedule`, `GET /api/visits/[id]/detail\|activity` with a Tenant B visit id | 404 |
+| Blocked time / availability (Phase 4) | `DELETE /api/schedule/blocked-time/[id]` (Tenant B), `PUT /api/technicians/[id]/availability` (Tenant B tech) | 404 / 422 (technician not found for tenant) |
+| Technician own-visit scoping (Phase 4) | Technician `GET /api/schedule` and `/api/visits/[id]/detail` | Only visits they lead or assist on; another tech's visit → 404 |
 
 ## Cross-tenant creation attempts (POST body references another tenant's resource)
 
