@@ -40,6 +40,20 @@ type VisitRow = {
   completed_by_name: string | null;
   created_at: string;
   updated_at: string;
+  // Phase 4 scheduling columns (nullable/defaulted — older rows predate them)
+  planned_start_at?: string | null;
+  planned_end_at?: string | null;
+  arrival_window_start?: string | null;
+  arrival_window_end?: string | null;
+  estimated_duration_minutes?: number | null;
+  travel_buffer_minutes?: number | null;
+  all_day?: boolean | null;
+  route_order?: number | null;
+  reschedule_reason?: string | null;
+  actual_start_at?: string | null;
+  version?: number | null;
+  ghl_appointment_id?: string | null;
+  ghl_sync_state?: string | null;
 };
 
 function mapVisitRow(row: VisitRow): Visit {
@@ -60,6 +74,19 @@ function mapVisitRow(row: VisitRow): Visit {
     completed_by_name:  row.completed_by_name,
     created_at:         row.created_at,
     updated_at:         row.updated_at,
+    planned_start_at:           row.planned_start_at ?? null,
+    planned_end_at:             row.planned_end_at ?? null,
+    arrival_window_start:       row.arrival_window_start ?? null,
+    arrival_window_end:         row.arrival_window_end ?? null,
+    estimated_duration_minutes: row.estimated_duration_minutes ?? null,
+    travel_buffer_minutes:      row.travel_buffer_minutes ?? 0,
+    all_day:                    row.all_day ?? false,
+    route_order:                row.route_order ?? null,
+    reschedule_reason:          row.reschedule_reason ?? null,
+    actual_start_at:            row.actual_start_at ?? null,
+    version:                    row.version ?? 1,
+    ghl_appointment_id:         row.ghl_appointment_id ?? null,
+    ghl_sync_state:             (row.ghl_sync_state as Visit["ghl_sync_state"]) ?? "none",
   };
 }
 

@@ -85,3 +85,33 @@ describe("estimate permission matrix (Phase 3)", () => {
     }
   });
 });
+
+describe("scheduling permission matrix (Phase 4)", () => {
+  it("technicians get no admin schedule surface (own-visit scoped instead)", () => {
+    const p = rolePermissions[UserRole.TECHNICIAN];
+    expect(p.canViewSchedule).toBe(false);
+    expect(p.canManageSchedule).toBe(false);
+    expect(p.canAssignTechnicians).toBe(false);
+  });
+
+  it("office staff can view and manage the schedule", () => {
+    const p = rolePermissions[UserRole.OFFICE_STAFF];
+    expect(p.canViewSchedule).toBe(true);
+    expect(p.canManageSchedule).toBe(true);
+    expect(p.canAssignTechnicians).toBe(true);
+  });
+
+  it("read-only owner can view but not manage the schedule", () => {
+    const p = rolePermissions[UserRole.READ_ONLY_OWNER];
+    expect(p.canViewSchedule).toBe(true);
+    expect(p.canManageSchedule).toBe(false);
+  });
+
+  it("tenant admin and platform owner fully manage the schedule", () => {
+    for (const role of [UserRole.TENANT_ADMIN, UserRole.PLATFORM_OWNER]) {
+      const p = rolePermissions[role];
+      expect(p.canViewSchedule).toBe(true);
+      expect(p.canManageSchedule).toBe(true);
+    }
+  });
+});

@@ -48,7 +48,17 @@ export type AuditActionType =
   | "estimate.voided"
   | "estimate.override"
   | "estimate.converted"
-  | "estimate.token_revoked";
+  | "estimate.token_revoked"
+  // Scheduling / dispatch (Phase 4)
+  | "visit.assigned"
+  | "visit.reassigned"
+  | "visit.rescheduled"
+  | "visit.route_reordered"
+  | "blocked_time.created"
+  | "blocked_time.deleted"
+  | "recurring.paused"
+  | "recurring.resumed"
+  | "recurring.occurrence_skipped";
 
 export interface AuditEntry {
   tenantId: string;
