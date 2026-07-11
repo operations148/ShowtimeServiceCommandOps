@@ -65,6 +65,7 @@ export type AuditActionType =
   | "work_order.closed"
   | "work_order.reopened"
   | "work_order.cancelled"
+  | "work_order.child_created"
   | "work_order_task.created"
   | "work_order_task.updated"
   | "work_order_task.deleted"

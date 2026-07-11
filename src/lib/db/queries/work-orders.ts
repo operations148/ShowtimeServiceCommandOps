@@ -253,11 +253,18 @@ export async function findByGhlOpportunityId(
 
 // ---------------------------------------------------------------------------
 // createWorkOrder — called from POST /api/work-orders (UI form)
+//
+// tenantId is required (not defaulted) — this previously fell back to a
+// hardcoded "tenant-showtime" if the caller omitted it, the same
+// tenant-isolation hazard already closed on listWorkOrders. Its one caller
+// already passes tenantId explicitly. Closed while adding Phase 5 child
+// work order support (parentWorkOrderId).
 // ---------------------------------------------------------------------------
 
 export async function createWorkOrder(
   input: NewWorkOrderInput,
-  tenantId = "tenant-showtime"
+  tenantId: string,
+  parentWorkOrderId?: string
 ): Promise<WorkOrderWithRelations> {
   const { data, error } = await db
     .from("work_orders")
@@ -273,12 +280,25 @@ export async function createWorkOrder(
       scheduled_date:   input.scheduled_date ?? null,
       estimate_handoff_status: EstimateHandoffStatus.NOT_NEEDED,
       ghl_sync_failed:  false,
+      parent_work_order_id: parentWorkOrderId ?? null,
     })
     .select(WO_SELECT)
     .single();
 
   if (error) throw new Error(`[db] createWorkOrder: ${error.message}`);
   return mapRow(data as unknown as WoJoinedRow);
+}
+
+/** Child work orders of a project (Phase 5). */
+export async function listChildWorkOrders(parentWorkOrderId: string, tenantId: string): Promise<WorkOrderWithRelations[]> {
+  const { data, error } = await db
+    .from("work_orders")
+    .select(WO_SELECT)
+    .eq("parent_work_order_id", parentWorkOrderId)
+    .eq("tenant_id", tenantId)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(`[db] listChildWorkOrders: ${error.message}`);
+  return (data as unknown as WoJoinedRow[]).map(mapRow);
 }
 
 // ---------------------------------------------------------------------------
