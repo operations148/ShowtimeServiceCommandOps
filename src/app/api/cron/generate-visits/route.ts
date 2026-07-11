@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { db } from "@/lib/db/client";
 import { generateAllActiveVisits } from "@/lib/scheduling/generate-visits";
+import { startCronRun, finishCronRun } from "@/lib/db/queries/cron-runs";
 import { logger } from "@/lib/security/logger";
 
 /**
@@ -40,6 +41,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const runId = await startCronRun("generate-visits");
+
   try {
     // Fetch all tenant IDs
     const { data: tenants, error: tenantError } = await db
@@ -48,10 +51,18 @@ export async function GET(request: NextRequest) {
 
     if (tenantError) throw new Error(`Failed to fetch tenants: ${tenantError.message}`);
 
-    const results: Record<string, { created: number; skipped: number; schedules: number }> = {};
+    // Per-tenant isolation: one tenant's failure must not abort the whole run
+    // (safe retry — generation is idempotent, so re-running only fills gaps).
+    const results: Record<string, { created: number; skipped: number; schedules: number; error?: string }> = {};
 
     for (const tenant of tenants ?? []) {
-      results[tenant.id] = await generateAllActiveVisits(tenant.id, 4);
+      try {
+        results[tenant.id] = await generateAllActiveVisits(tenant.id, 4);
+      } catch (tenantErr) {
+        const message = tenantErr instanceof Error ? tenantErr.message : String(tenantErr);
+        logger.error("[cron/generate-visits] tenant failed", { tenantId: tenant.id, error: message });
+        results[tenant.id] = { created: 0, skipped: 0, schedules: 0, error: message };
+      }
     }
 
     const totals = Object.values(results).reduce(
@@ -65,9 +76,12 @@ export async function GET(request: NextRequest) {
 
     console.log(`[cron] generate-visits complete — ${totals.schedules} schedules, ${totals.created} created, ${totals.skipped} skipped`);
 
-    return NextResponse.json({ ok: true, totals, byTenant: results });
+    await finishCronRun(runId, { status: "succeeded", totals, byTenant: results });
+    return NextResponse.json({ ok: true, runId, totals, byTenant: results });
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error("[cron] generate-visits failed:", err);
+    await finishCronRun(runId, { status: "failed", error: message });
     return NextResponse.json({ error: "Cron job failed" }, { status: 500 });
   }
 }
