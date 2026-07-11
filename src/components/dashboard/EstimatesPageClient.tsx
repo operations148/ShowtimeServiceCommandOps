@@ -8,7 +8,6 @@ import {
   Send,
   CheckCircle2,
   XCircle,
-  AlertTriangle,
   ChevronRight,
   Loader2,
 } from "lucide-react";

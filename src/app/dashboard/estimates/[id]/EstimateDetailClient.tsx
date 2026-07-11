@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
   Loader2,
@@ -45,7 +44,6 @@ const STATUS_BADGE: Record<EstimateStatus, string> = {
 };
 
 export function EstimateDetailClient({ id }: { id: string }) {
-  const router = useRouter();
   const { data: session } = useSession();
   const role = session?.user?.role as UserRole | undefined;
   const perms = role ? rolePermissions[role] : undefined;
