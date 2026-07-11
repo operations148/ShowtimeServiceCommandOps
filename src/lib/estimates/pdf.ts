@@ -1,6 +1,6 @@
 import PDFDocument from "pdfkit";
 import type { PublicEstimate } from "@/types/estimate";
-import { pdfText } from "./pdf-text";
+import { pdfText } from "@/lib/pdf/pdf-text";
 import { formatCents } from "@/lib/money/money";
 
 /**

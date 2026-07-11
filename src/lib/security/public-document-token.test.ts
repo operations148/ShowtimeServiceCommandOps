@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { generatePublicToken, hashPublicToken, checkTokenValidity } from "./public-token";
+import { generatePublicToken, hashPublicToken, checkTokenValidity } from "./public-document-token";
 
 describe("generatePublicToken", () => {
   it("returns a high-entropy token and its matching hash", () => {

@@ -1,5 +1,7 @@
 /**
- * Normalizes an untrusted value for safe inclusion in a generated PDF (Phase 3).
+ * Normalizes an untrusted value for safe inclusion in a generated PDF
+ * (introduced Phase 3 for estimates; promoted to a shared PDF module in
+ * Phase 5 when work-order completion reports adopted the same pattern).
  *
  * pdfkit renders plain text (not markup), so the risk is not XSS but layout/
  * content corruption from control characters, and non-string inputs throwing.
