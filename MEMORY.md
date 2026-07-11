@@ -35,7 +35,8 @@ _Last updated: 2026-06-16 — Supabase DB live, GHL pipeline stages confirmed, P
 | 18 | GHL Retry Queue Persistence | ⏳ Not Started (currently in-memory only, needs DB table backing — reconfirmed by Phase 0 audit) |
 | 19 | Multi-Tenant SaaS Hardening | ⏳ Not Started |
 | 20 | QA and Launch | ⏳ Pending |
-| 21 | Markate-Inspired Expansion — Phase 0 (Repository Audit) | ✅ Done 2026-07-11 — see `docs/audits/`, `docs/architecture/`, `docs/implementation/`, `memory/phase-0-audit.md`. 0 critical / 4 high security findings; master plan for Phases 1-11 established. Phase 1 (security foundation) is next and is a release blocker. |
+| 21 | Markate-Inspired Expansion — Phase 0 (Repository Audit) | ✅ Done 2026-07-11 — see `docs/audits/`, `docs/architecture/`, `docs/implementation/`, `memory/phase-0-audit.md`. 0 critical / 4 high security findings; master plan for Phases 1-11 established. |
+| 22 | Markate-Inspired Expansion — Phase 1 (Security/Tenancy/Authorization Foundation) | ✅ Done 2026-07-11 — branch `feat/serviceops-phase-1-security`. Session revocation (session_version + trusted-context re-validation on every request), durable Postgres-backed rate limiting, durable GHL sync outbox (replaces in-memory retry-queue.ts), fail-closed cron, hashed+atomic invitation tokens, self-service password reset, magic-byte file validation + EXIF strip, security headers, CSRF/origin check, granular permission flags, CI pipeline + Vitest (neither existed before). See `docs/security/security-controls.md` for the full finding→control map and `memory/phase-1-security-foundation.md`. RLS reachability, MFA, and the untracked invoices/user_invitations migrations remain deliberately deferred (documented). Phase 2 (core data model, money utilities, pricebook) is next. |
 
 ## Tech Stack (Confirmed — All Decisions Locked)
 - **Framework**: Next.js 15, App Router — no Pages Router ever
