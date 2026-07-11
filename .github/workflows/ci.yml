@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+# Least-privilege default (Phase 1: "least-privilege GitHub Actions
+# permissions") -- no job needs more than reading the repo checkout.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Migration-modification check needs history to diff against the
+          # base branch, and needs the base branch fetched explicitly since
+          # a default checkout is shallow and single-branch.
+          fetch-depth: 0
+
+      - name: Fetch base branch for migration diff
+        if: github.event_name == 'pull_request'
+        run: git fetch origin ${{ github.base_ref }} --depth=1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies (locked)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit/integration tests
+        run: npm run test
+
+      - name: Migration additive-only check
+        if: github.event_name == 'pull_request'
+        run: bash scripts/check-migrations.sh origin/${{ github.base_ref }}
+
+      - name: Build
+        run: npm run build
+        env:
+          # Dummy values so the build's env-presence check and static
+          # generation succeed in CI without real secrets. No live service
+          # is ever called during `next build`.
+          NEXTAUTH_SECRET: ci-placeholder-secret-not-real
+          NEXTAUTH_URL: http://localhost:3000
+          NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key
+          GHL_WEBHOOK_SECRET: ci-placeholder-webhook-secret
+          GHL_PRIVATE_INTEGRATION_TOKEN: ci-placeholder-token
+          GHL_LOCATION_ID: ci-placeholder-location
+          CRON_SECRET: ci-placeholder-cron-secret
+
+      - name: Dependency audit
+        run: npm audit --audit-level=critical
+        continue-on-error: true # advisory only -- see docs/audits/dependency-audit.md for the accepted-risk list
+
+      - name: Lightweight secret-pattern scan
+        run: |
+          # Not a substitute for a dedicated tool (gitleaks/trufflehog) --
+          # those involve a licensing/cost decision left to Phase 11's
+          # production-readiness pass. This is a fast, free, good-faith check
+          # for the most common obviously-shaped secrets landing in a diff.
+          if git diff --name-only origin/${{ github.base_ref || 'master' }}...HEAD 2>/dev/null | xargs -r grep -nE "(AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|sk_live_[0-9a-zA-Z]{20,})" -- 2>/dev/null; then
+            echo "Potential secret pattern found in diff -- review before merging."
+            exit 1
+          fi
+          echo "No obvious secret patterns found."
