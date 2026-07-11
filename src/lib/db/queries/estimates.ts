@@ -679,5 +679,65 @@ export async function transitionEstimate(
   return { ok: true, data: mapEstimate(data as EstimateRow) };
 }
 
+// ─── Public token resolution (cross-tenant — the token IS the credential) ─────
+/**
+ * Resolves an estimate by its hashed public token. Intentionally NOT
+ * tenant-scoped: there is no ambient session on the public route, so the token
+ * possession is the only credential and the tenant is DERIVED from the found
+ * row (never trusted from the caller). Returns undefined for any miss so the
+ * public route can surface one generic error with no oracle.
+ */
+export async function resolveEstimateByTokenHash(
+  tokenHash: string,
+  opts: { withLines?: boolean } = {}
+): Promise<Estimate | undefined> {
+  const { data, error } = await db
+    .from("estimates")
+    .select("*")
+    .eq("public_token_hash", tokenHash)
+    .maybeSingle();
+  if (error) throw new Error(`[db] resolveEstimateByTokenHash: ${error.message}`);
+  if (!data) return undefined;
+
+  const row = data as EstimateRow;
+  if (opts.withLines) {
+    const lines = await getEstimateLines(row.id, row.tenant_id);
+    return mapEstimate(row, lines);
+  }
+  return mapEstimate(row);
+}
+
+/**
+ * Marks a sent estimate as viewed on first customer open. Idempotent: sets
+ * viewed_at once and advances sent→viewed; a no-op for any other status.
+ */
+export async function markEstimateViewed(
+  estimateId: string,
+  tenantId: string,
+  ctx: { ip?: string | null; userAgent?: string | null } = {}
+): Promise<void> {
+  const { data, error } = await db
+    .from("estimates")
+    .update({ status: EstimateStatus.VIEWED, viewed_at: new Date().toISOString() })
+    .eq("id", estimateId)
+    .eq("tenant_id", tenantId)
+    .eq("status", EstimateStatus.SENT) // only advance from sent; leave viewed/accepted alone
+    .select("id")
+    .maybeSingle();
+  if (error) {
+    console.error("[db] markEstimateViewed:", error.message);
+    return;
+  }
+  if (data) {
+    await recordEstimateEvent({
+      estimateId,
+      tenantId,
+      eventType: "viewed",
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+    });
+  }
+}
+
 export { mapEstimate, mapLine };
 export type { EstimateRow, LineRow };

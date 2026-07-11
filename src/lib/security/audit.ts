@@ -52,7 +52,8 @@ export type AuditActionType =
 
 export interface AuditEntry {
   tenantId: string;
-  userId: string;
+  /** null for unauthenticated/customer-originated events (e.g. public estimate accept). */
+  userId: string | null;
   actionType: AuditActionType;
   description: string;
   entityType?: string;
