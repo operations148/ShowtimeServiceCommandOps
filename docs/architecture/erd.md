@@ -194,6 +194,15 @@ Known columns, reconstructed from `src/lib/db/queries/invoices.ts`'s `InvoiceRow
 | `estimate_handoff_status` | not_needed, flagged, sent_to_ghl, estimate_sent, approved, declined |
 | `visit_status` | scheduled, in_progress, completed, skipped, rescheduled, cancelled |
 | `invoice_status` | draft, deposit_due, deposit_paid, paid, void |
+| `pricebook_item_type` (Phase 2) | service, labor, material, equipment, fee, discount, bundle |
+| `estimate_status` (Phase 3) | draft, ready, sent, viewed, accepted, declined, expired, converted, voided |
+| `estimate_line_item_kind` (Phase 3) | standard, optional, recommended |
+
+## Phase 3 additions (migration 20260711000003)
+
+New tables (see `database-blueprint/estimates.md`): **estimates** (full financial document; server-computed totals; hashed public token; version + sent/accepted-version pointers; decision + lock + conversion metadata), **estimate_line_items** (immutable snapshots + kind/option_group/is_selected for optional/package lines), **estimate_versions** (append-only JSONB snapshots — draft/sent/accepted), **estimate_events** (append-only activity/approval/send log). Plus a partial `UNIQUE(invoices.estimate_id)` for idempotent estimate→invoice conversion.
+
+The pre-existing `estimate_handoffs` table (technician "needs estimate" flag) is **untouched** — Phase 3 adds the document layer alongside it (optionally linked via `estimates.estimate_handoff_id`), so no technician-flagged data is lost. First unauthenticated surface in the app: `/estimate/[token]` + `/api/public/estimates/*` (token is the credential; strict output redaction; see ADR-0007).
 
 ## Duplicate/conflicting type definitions (flagged for Phase 2)
 

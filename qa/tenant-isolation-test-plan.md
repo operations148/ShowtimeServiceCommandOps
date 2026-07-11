@@ -27,6 +27,8 @@ For every resource type, log in as a Tenant A user and attempt to access a Tenan
 | Pricebook item (Phase 2) | `GET/PATCH/DELETE /api/pricebook/items/[id]`, `POST .../restore`, `POST/DELETE .../image`, `GET/PUT .../bundle` | 404 |
 | Pricebook category (Phase 2) | `PATCH/DELETE /api/pricebook/categories/[id]`, `POST .../restore` | 404 |
 | Pricebook export (Phase 2) | `GET /api/pricebook/export` as Tenant A | CSV contains only Tenant A rows — verify no Tenant B item names appear |
+| Estimate document (Phase 3) | `GET/PATCH /api/estimates/[id]`, `POST .../transition\|send\|override\|revoke-token`, `GET .../versions\|activity\|pdf` | 404 |
+| Public estimate token (Phase 3) | `GET/POST /api/public/estimates/[token]` with a Tenant B token while probing as Tenant A | Resolves ONLY to Tenant B's estimate (token is the credential; tenant derived from the row, never the caller). No Tenant A data ever returned. Invalid token → one generic 404. |
 
 ## Cross-tenant creation attempts (POST body references another tenant's resource)
 
