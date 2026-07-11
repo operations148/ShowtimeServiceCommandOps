@@ -9,8 +9,29 @@ _Generated: 2026-06-11. This document is the single source of truth for a new Cl
 ServiceOps Command Center is a GHL-integrated work order and field operations SaaS, built first for **Showtime Pool Service** (California). It plugs into GoHighLevel via webhooks and private integration API to receive job-ready data, create work orders, route jobs to field technicians, and push status updates back to GHL when a job is completed or an estimate is needed. The long-term vision is a white-label Jobber-style add-on sold to local service businesses (pool service, HVAC, landscaping, plumbing) already using GoHighLevel. The app is **live in production** at `https://serviceops-ghl-workorders.vercel.app`.
 
 - **GitHub repo**: https://github.com/Eriin2816/service-command-ops.git
+- **Client repo (Markate expansion)**: https://github.com/operations148/ShowtimeServiceCommandOps
 - **Production URL**: https://serviceops-ghl-workorders.vercel.app
 - **Project root**: `serviceops-ghl-workorders-scaffold/serviceops-ghl-workorders/`
+
+---
+
+## Markate-Inspired Expansion Status (read this first — newer than the sections below)
+
+The July 2026 expansion (phased plan in `docs/implementation/master-plan.md`) supersedes the older status sections in this document where they conflict. Nothing below this section has been rewritten; trust `MEMORY.md` rows 21-23 and the phase memory files for current truth.
+
+| Phase | Status | Branch | Key artifacts |
+|---|---|---|---|
+| 0 — Repository audit | ✅ 2026-07-11 | `feat/phase-0-audit` | `docs/audits/*`, `docs/implementation/master-plan.md`, `memory/phase-0-audit.md` |
+| 1 — Security/tenancy/authorization foundation | ✅ 2026-07-11 | `feat/serviceops-phase-1-security` | `docs/security/security-controls.md`, ADR-0002/3/4, `qa/security-test-plan.md` |
+| 2 — Core data model, money, pricebook | ✅ 2026-07-11 | `feat/serviceops-phase-2-pricebook` | `src/lib/money/`, `document_sequences`, pricebook (API + `/dashboard/pricebook`), ADR-0005/6, `specs/pricebook.md`, `docs/architecture/target-state.md` |
+| 3 — Full estimates/proposals/approval | ⏳ next | | prompt in `ServiceOps_Claude_Code_All_Phases.md` |
+
+**Standing facts a new session must know** (details in `docs/architecture/target-state.md`):
+- All money math goes through `src/lib/money/money.ts` (integer cents); document numbers through `nextDocumentNumber()` — never `COUNT(*)+1`.
+- `src/types/invoice.ts` is the ONLY invoice model (`src/types/estimate.ts` was dead code, deleted Phase 2).
+- `internal_cost` on pricebook items is server-redacted for roles without `canViewItemCosts`.
+- Migrations `20260711000001`/`20260711000002` are written but **not applied to the live DB** — application requires explicit approval.
+- Every request re-validates auth against the DB via the trusted context (`src/lib/auth/trusted-context.ts`); rate limiting and the GHL sync retry queue are Postgres-backed.
 
 ---
 

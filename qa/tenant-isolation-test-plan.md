@@ -24,6 +24,9 @@ For every resource type, log in as a Tenant A user and attempt to access a Tenan
 | Estimate handoff (via work order) | `PATCH /api/work-orders/[id]` with estimate fields | 404 (work order lookup fails first) |
 | Invitation acceptance | `POST /api/invitations/accept` with a Tenant B invite token, attempted while it's unexpired | Should succeed (tokens aren't tenant-scoped by the caller's session — there is no caller session at accept time; token possession is the credential) — confirm the created session then correctly reflects Tenant B, not Tenant A |
 | Password reset | `POST /api/auth/password-reset/confirm` | Same as above — token possession is the credential, tenant is derived from the token's owner, not any ambient session |
+| Pricebook item (Phase 2) | `GET/PATCH/DELETE /api/pricebook/items/[id]`, `POST .../restore`, `POST/DELETE .../image`, `GET/PUT .../bundle` | 404 |
+| Pricebook category (Phase 2) | `PATCH/DELETE /api/pricebook/categories/[id]`, `POST .../restore` | 404 |
+| Pricebook export (Phase 2) | `GET /api/pricebook/export` as Tenant A | CSV contains only Tenant A rows — verify no Tenant B item names appear |
 
 ## Cross-tenant creation attempts (POST body references another tenant's resource)
 
@@ -32,6 +35,19 @@ For every resource type, log in as a Tenant A user and attempt to access a Tenan
 | Create visit referencing Tenant B's `work_order_id` while authenticated as Tenant A | `POST /api/visits` | 422 "work_order_id not found for this tenant" (Phase 1 fix — see security-audit M8) |
 | Create visit referencing Tenant B's `property_id` while authenticated as Tenant A | `POST /api/visits` | 422 "property_id not found for this tenant" |
 | Create visit with `technician_id` belonging to Tenant B while authenticated as Tenant A admin | `POST /api/visits` | 422 "technician_id not found for this tenant" |
+| Create pricebook item referencing Tenant B's `category_id` (Phase 2) | `POST /api/pricebook/items` | 422 "category_id not found for this tenant" |
+| Set bundle children referencing Tenant B's item ids (Phase 2) | `PUT /api/pricebook/items/[id]/bundle` | 422 with `invalidChildren` listing the foreign ids |
+
+## Phase 2 additions — cost-visibility and concurrency checks
+
+| Scenario | Expected |
+|---|---|
+| `GET /api/pricebook/items` as OFFICE_STAFF | No `internal_cost` key on any item (server-stripped, not UI-hidden) |
+| `PATCH /api/pricebook/items/[id]` with `internal_cost` as OFFICE_STAFF | 403 "Your role cannot set internal costs" |
+| `GET /api/pricebook/export` as OFFICE_STAFF | 403 (no export permission); as READ_ONLY_OWNER: CSV **with** `internal_cost_dollars` column |
+| Any pricebook route as TECHNICIAN | 403 (no `canViewPricebook`) |
+| Two sessions PATCH the same item with the same `version` | Exactly one 200; the other 409 with `currentVersion` |
+| Sequence concurrency (staging only) | Run `scripts/verify-sequence-concurrency.sql` — 1,000 claims, zero duplicates, gapless |
 
 ## Session/JWT tenant confusion
 
