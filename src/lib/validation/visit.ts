@@ -51,6 +51,12 @@ export const PatchVisitSchema = z.object({
   completed_at:        z.string().optional(),
   completion_message:  z.string().max(500).optional(),
   completed_by_name:   z.string().max(200).optional(),
+  // Phase 5 tenant-configurable completion-requirement capture fields.
+  customer_signature:  z.string().max(20000).optional(),
+  equipment_reading:   z.string().max(500).optional(),
+  time_entry_minutes:  z.number().int().min(0).max(1440).optional(),
+  material_usage:      z.string().max(2000).optional(),
+  completion_reason:   z.string().max(1000).optional(),
 });
 
 export type PatchVisitInput = z.infer<typeof PatchVisitSchema>;

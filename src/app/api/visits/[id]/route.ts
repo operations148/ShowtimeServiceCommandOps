@@ -3,10 +3,15 @@ import { PatchVisitSchema } from "@/lib/validation/visit";
 import { getVisitById, updateVisit } from "@/lib/db/queries/visits";
 import { VisitStatus } from "@/types/visit";
 import { WorkOrderStatus, EstimateHandoffStatus } from "@/types/work-order";
-import { updateWorkOrder } from "@/lib/db/queries/work-orders";
+import { updateWorkOrder, getWorkOrderById } from "@/lib/db/queries/work-orders";
 import { createEstimateHandoff } from "@/lib/db/queries/estimate-handoffs";
 import { syncEstimateToGhl } from "@/lib/ghl/sync-estimate";
 import { requireApiAuth, isTechnicianScoped, getTenantId } from "@/lib/auth/api-auth";
+import { resolveCompletionRuleForTenant } from "@/lib/db/queries/completion-requirements";
+import { resolveChecklistForCategory, writeVisitChecklistSnapshot } from "@/lib/db/queries/checklist-templates";
+import { evaluateCompletionRequirements, describeMissingRequirements } from "@/lib/work-orders/completion-requirements";
+import type { VisitCompletionData } from "@/types/completion-requirements";
+import type { ResolvedChecklistItem } from "@/types/checklist-template";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -85,6 +90,48 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     );
   }
 
+  // Pre-write gate: block the transition to COMPLETED if the tenant's
+  // configured completion requirements (checklist, photos, signature, etc.)
+  // aren't satisfied by the merged (existing + incoming) visit data.
+  const willComplete =
+    existingVisit.status !== VisitStatus.COMPLETED &&
+    (result.data.status ?? existingVisit.status) === VisitStatus.COMPLETED;
+
+  let resolvedChecklistForSnapshot: { items: ResolvedChecklistItem[]; templateId: string | null; templateVersion: number | null } | null = null;
+
+  if (willComplete) {
+    const workOrder = await getWorkOrderById(existingVisit.work_order_id, tenantId);
+    if (!workOrder) {
+      return NextResponse.json({ error: "Parent work order not found" }, { status: 404 });
+    }
+
+    const rule = await resolveCompletionRuleForTenant(tenantId, workOrder.service_category);
+    const mergedChecklist = result.data.checklist ?? existingVisit.checklist;
+
+    const completionData: VisitCompletionData = {
+      checklistComplete: mergedChecklist.every((item) => item.completed),
+      photoCount: existingVisit.photo_urls.length,
+      technicianNote: result.data.technician_notes ?? existingVisit.technician_notes,
+      customerSignature: result.data.customer_signature ?? existingVisit.customer_signature,
+      equipmentReading: result.data.equipment_reading ?? existingVisit.equipment_reading,
+      timeEntryMinutes: result.data.time_entry_minutes ?? existingVisit.time_entry_minutes,
+      materialUsage: result.data.material_usage ?? existingVisit.material_usage,
+      completionReason: result.data.completion_reason ?? existingVisit.completion_reason,
+    };
+
+    const { canComplete, missing } = evaluateCompletionRequirements(rule, completionData);
+    if (!canComplete) {
+      return NextResponse.json(
+        { error: "Cannot complete visit — required fields are missing", missing: describeMissingRequirements(missing) },
+        { status: 422 }
+      );
+    }
+
+    // Resolve the checklist template in effect now, so the completion
+    // snapshot records which items/labels were required at completion time.
+    resolvedChecklistForSnapshot = await resolveChecklistForCategory(tenantId, workOrder.service_category);
+  }
+
   let updateResult;
   try {
     updateResult = await updateVisit(id, result.data, tenantId);
@@ -124,6 +171,28 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     }).catch((err) => console.error("[visits/PATCH] createEstimateHandoff failed:", err));
     // Sync to GHL (fire-and-forget)
     void syncEstimateToGhl(updatedVisit);
+  }
+
+  // Write the immutable checklist-completion snapshot the moment the visit
+  // actually transitions to COMPLETED (independent of the completion_message
+  // gate below, which only controls the work-order side-effect update).
+  if (resolvedChecklistForSnapshot && updatedVisit.status === VisitStatus.COMPLETED) {
+    const snapshotItems: ResolvedChecklistItem[] = resolvedChecklistForSnapshot.items.map((templateItem) => {
+      const match = updatedVisit.checklist.find((c) => c.label === templateItem.label);
+      return {
+        label: templateItem.label,
+        is_required: templateItem.is_required,
+        completed: match?.completed ?? false,
+        notes: match?.notes ?? null,
+      };
+    });
+    void writeVisitChecklistSnapshot(
+      updatedVisit.id,
+      tenantId,
+      snapshotItems,
+      resolvedChecklistForSnapshot.templateId,
+      resolvedChecklistForSnapshot.templateVersion
+    ).catch((err) => console.error("[visits/PATCH] writeVisitChecklistSnapshot failed:", err));
   }
 
   // Detect completion: visit status → COMPLETED with a completion_message.

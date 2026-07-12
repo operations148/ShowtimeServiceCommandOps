@@ -53,6 +53,15 @@ export interface Visit {
   version: number;
   ghl_appointment_id?: string | null;
   ghl_sync_state: GhlSyncState;
+
+  // ── Phase 5 completion-requirement capture fields ───────────────────────────
+  customer_signature?: string | null;
+  equipment_reading?: string | null;
+  time_entry_minutes?: number | null;
+  material_usage?: string | null;
+  completion_reason?: string | null;
+  checklist_template_id?: string | null;
+  checklist_template_version?: number | null;
 }
 
 export type GhlSyncState = "none" | "linked" | "pending" | "synced" | "failed";

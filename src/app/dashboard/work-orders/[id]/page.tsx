@@ -26,6 +26,10 @@ export default async function WorkOrderDetailPage({ params }: Props) {
   const session = await getServerSession(authOptions);
   const tenantId = (session?.user as Record<string, string> | undefined)?.tenant_id;
 
+  // No tenant on the session means no authorized context to scope this query
+  // to — never fall back to a default tenant (security-audit M2 precedent).
+  if (!tenantId) notFound();
+
   let workOrder;
   try {
     workOrder = await getWorkOrderById(id, tenantId);
