@@ -3,10 +3,13 @@ import { requireApiAuth, requirePermission, getTenantId, isTechnicianScoped } fr
 import { listWorkOrderTasks, patchWorkOrderTask, deleteWorkOrderTask } from "@/lib/db/queries/work-order-tasks";
 import { PatchWorkOrderTaskSchema } from "@/lib/validation/work-order-project";
 import { recordAuditEvent } from "@/lib/security/audit";
+import { rolePermissions } from "@/config/roles";
+import type { UserRole } from "@/types/technician";
 
 // PATCH /api/work-orders/[id]/tasks/[taskId]
 // A technician may mark their OWN assigned task complete (is_completed only);
-// broader edits require canManageWorkOrderTasks.
+// every other role needs canManageWorkOrderTasks — requireApiAuth() alone is
+// not sufficient, since it accepts any authenticated role.
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; taskId: string }> }
@@ -36,6 +39,11 @@ export async function PATCH(
     const onlyCompletion = Object.keys(parsed.data).every((k) => k === "is_completed");
     if (!onlyCompletion) {
       return NextResponse.json({ error: "Technicians may only update completion status" }, { status: 403 });
+    }
+  } else {
+    const role = auth.session.user.role as UserRole;
+    if (!(rolePermissions[role]?.canManageWorkOrderTasks ?? false)) {
+      return NextResponse.json({ error: "Forbidden — your role does not have the 'canManageWorkOrderTasks' permission" }, { status: 403 });
     }
   }
 
