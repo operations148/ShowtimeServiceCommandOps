@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { EstimatesPageClient } from "@/components/dashboard/EstimatesPageClient";
+import { EstimatesWorkspace } from "@/components/dashboard/EstimatesWorkspace";
 
 export const metadata: Metadata = { title: "Estimates" };
 
 export default function EstimatesPage() {
-  return <EstimatesPageClient />;
+  return <EstimatesWorkspace />;
 }

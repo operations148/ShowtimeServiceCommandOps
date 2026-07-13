@@ -8,7 +8,6 @@ import {
   Send,
   CheckCircle2,
   XCircle,
-  AlertTriangle,
   ChevronRight,
   Loader2,
 } from "lucide-react";
@@ -63,7 +62,7 @@ function formatDate(isoStr: string): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function EstimatesPageClient() {
+export function EstimatesPageClient({ embedded = false }: { embedded?: boolean } = {}) {
   const { data, error, loading, retry } = useApiQuery<WorkOrderWithRelations[]>(
     "/api/work-orders?estimate=true"
   );
@@ -94,15 +93,17 @@ export function EstimatesPageClient() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
-      {/* Header */}
-      <div>
-        <Breadcrumb items={[{ label: "Estimates" }]} className="mb-2" />
-        <h2 className="font-display text-2xl font-bold text-slate-900">Estimates</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Jobs flagged by technicians as needing an estimate — handoff to GHL.
-        </p>
-      </div>
+    <div className={embedded ? "space-y-6" : "mx-auto max-w-7xl space-y-6"}>
+      {/* Header — hidden when embedded inside the estimates workspace tabs */}
+      {!embedded && (
+        <div>
+          <Breadcrumb items={[{ label: "Estimates" }]} className="mb-2" />
+          <h2 className="font-display text-2xl font-bold text-slate-900">Estimates</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Jobs flagged by technicians as needing an estimate — handoff to GHL.
+          </p>
+        </div>
+      )}
 
       {/* Stat row */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">

@@ -24,14 +24,16 @@ The July 2026 expansion (phased plan in `docs/implementation/master-plan.md`) su
 | 0 — Repository audit | ✅ 2026-07-11 | `feat/phase-0-audit` | `docs/audits/*`, `docs/implementation/master-plan.md`, `memory/phase-0-audit.md` |
 | 1 — Security/tenancy/authorization foundation | ✅ 2026-07-11 | `feat/serviceops-phase-1-security` | `docs/security/security-controls.md`, ADR-0002/3/4, `qa/security-test-plan.md` |
 | 2 — Core data model, money, pricebook | ✅ 2026-07-11 | `feat/serviceops-phase-2-pricebook` | `src/lib/money/`, `document_sequences`, pricebook (API + `/dashboard/pricebook`), ADR-0005/6, `specs/pricebook.md`, `docs/architecture/target-state.md` |
-| 3 — Full estimates/proposals/approval | ⏳ next | | prompt in `ServiceOps_Claude_Code_All_Phases.md` |
+| 3 — Full estimates/proposals/secure approval | ✅ 2026-07-12 | `feat/serviceops-phase-3-estimates` | `src/lib/estimates/*`, estimates tables, `/dashboard/estimates` + `/estimate/[token]`, ADR-0007/8, `specs/estimates.md`, `database-blueprint/estimates.md` |
+| 4 — Scheduling / dispatch upgrades | ⏳ next | | prompt in `ServiceOps_Claude_Code_All_Phases.md` |
 
 **Standing facts a new session must know** (details in `docs/architecture/target-state.md`):
-- All money math goes through `src/lib/money/money.ts` (integer cents); document numbers through `nextDocumentNumber()` — never `COUNT(*)+1`.
-- `src/types/invoice.ts` is the ONLY invoice model (`src/types/estimate.ts` was dead code, deleted Phase 2).
-- `internal_cost` on pricebook items is server-redacted for roles without `canViewItemCosts`.
-- Migrations `20260711000001`/`20260711000002` are written but **not applied to the live DB** — application requires explicit approval.
-- Every request re-validates auth against the DB via the trusted context (`src/lib/auth/trusted-context.ts`); rate limiting and the GHL sync retry queue are Postgres-backed.
+- All money math goes through `src/lib/money/money.ts` (integer cents); document numbers through `nextDocumentNumber()` — never `COUNT(*)+1`. Document line items are immutable snapshots (`createLineItemSnapshot`); estimate/invoice totals are computed server-side from selected lines and never trusted from the client.
+- `src/types/invoice.ts` is the ONLY invoice model; `src/types/estimate.ts` is now the REAL migrated estimate document model (Phase 3), not the old dead file (which was deleted in Phase 2).
+- `internal_cost`/`unit_cost` are server-redacted for roles without `canViewItemCosts`; the public estimate route redacts via an allowlist type (`PublicEstimate`) so internal fields structurally cannot leak.
+- Estimate customer emails are gated: `ESTIMATE_EMAIL_MODE` defaults to `preview` (no real send). `live` is the external-action approval gate. Public estimate links use a hashed token (ADR-0007).
+- Migrations `20260711000001`/`0002`/`0003` are written but **not applied to the live DB** — application requires explicit approval.
+- Every authenticated request re-validates auth against the DB via the trusted context (`src/lib/auth/trusted-context.ts`); rate limiting and the GHL sync retry queue are Postgres-backed. The public estimate routes are the only unauthenticated surface (token is the credential).
 
 ---
 

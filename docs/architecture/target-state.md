@@ -21,11 +21,11 @@ ServiceOps Command Center is a GHL-integrated field-operations SaaS where:
 | Schema reconciliation (one invoice model) | ✅ Phase 2 | `src/types/invoice.ts` authoritative; `estimate.ts` deleted |
 | Pricebook (catalog, permissions, cost redaction, UI) | ✅ Phase 2 | `specs/pricebook.md`, ADR-0006 |
 | Line-item snapshot foundation | ✅ Phase 2 | `src/lib/documents/line-item-snapshot.ts` |
-| Full estimates/proposals + customer approval | Phase 3 | builds on snapshots + numbering + pricebook |
+| Full estimates/proposals + secure customer approval | ✅ Phase 3 | `src/lib/estimates/*`, `specs/estimates.md`, ADR-0007/0008 |
 | Scheduling/dispatch upgrades | Phase 4 | |
-| Invoicing + payments (activate the orphaned backend) | Phase 5 | existing `invoices` backend gains routes/UI |
+| Invoicing + payments (activate the orphaned backend) | Phase 5 | estimate acceptance already materialises a DRAFT invoice (idempotent); Phase 5 adds sending/deposit/payment + UI |
 | Job costing + profitability | Phase 6 | needs `unit_cost` snapshots from Phase 2 |
-| Customer portal | Phase 7 | first anon-visible surface; re-run RLS decision then |
+| Customer portal | Phase 7 | can reuse the Phase 3 public-token pattern (ADR-0007) as its baseline; re-run RLS decision then |
 | Reporting suite | Phase 8 | |
 | Tenant onboarding/white-label | Phase 10 | global identity decision (ADR-0002) revisited here |
 | Production readiness (RLS reachability, MFA, monitoring) | Phase 11 | |
