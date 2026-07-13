@@ -66,6 +66,23 @@ type WoJoinedRow = {
   tech_completion_message: string | null;
   tech_completed_by: string | null;
   tech_completed_at: string | null;
+  // Phase 5 project/archive columns (nullable/defaulted — older rows predate them)
+  parent_work_order_id: string | null;
+  is_multi_day: boolean | null;
+  budget_cents: number | null;
+  approved_contract_amount_cents: number | null;
+  actual_cost_cents: number | null;
+  customer_notes: string | null;
+  internal_notes: string | null;
+  cancellation_reason: string | null;
+  archived_at: string | null;
+  archived_by: string | null;
+  closed_at: string | null;
+  closed_by: string | null;
+  reopened_at: string | null;
+  reopen_count: number | null;
+  checklist_template_id: string | null;
+  version: number | null;
   created_at: string;
   updated_at: string;
   // Embedded joins
@@ -100,6 +117,22 @@ function mapRow(row: WoJoinedRow): WorkOrderWithRelations {
     tech_completion_message: row.tech_completion_message,
     tech_completed_by:       row.tech_completed_by,
     tech_completed_at:       nullToUndef(row.tech_completed_at),
+    parent_work_order_id:    row.parent_work_order_id ?? null,
+    is_multi_day:            row.is_multi_day ?? false,
+    budget_cents:            row.budget_cents ?? null,
+    approved_contract_amount_cents: row.approved_contract_amount_cents ?? 0,
+    actual_cost_cents:       row.actual_cost_cents ?? 0,
+    customer_notes:          row.customer_notes ?? null,
+    internal_notes:          row.internal_notes ?? null,
+    cancellation_reason:     row.cancellation_reason ?? null,
+    archived_at:             row.archived_at ?? null,
+    archived_by:             row.archived_by ?? null,
+    closed_at:               row.closed_at ?? null,
+    closed_by:               row.closed_by ?? null,
+    reopened_at:             row.reopened_at ?? null,
+    reopen_count:            row.reopen_count ?? 0,
+    checklist_template_id:   row.checklist_template_id ?? null,
+    version:                 row.version ?? 1,
     created_at:              row.created_at,
     updated_at:              row.updated_at,
     // Computed relation fields
@@ -134,7 +167,7 @@ export type UpdateResult =
 // ---------------------------------------------------------------------------
 
 export interface ListFilters {
-  tenant_id?: string;
+  tenant_id: string;
   status?: WorkOrderStatus;
   category?: string;
   technician_id?: string;
@@ -142,21 +175,27 @@ export interface ListFilters {
   estimate?: boolean; // when true, filter where estimate_handoff_status != 'not_needed'
   date?: string;      // YYYY-MM-DD — filter by scheduled_date exact match
   exclude_cancelled?: boolean; // when true, exclude cancelled work orders
+  /** Phase 5: archived work orders are hidden by default (soft-delete). */
+  include_archived?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // listWorkOrders
+//
+// tenant_id is required (not defaulted) — this previously fell back to a
+// hardcoded "tenant-showtime" if the caller omitted it, a tenant-isolation
+// hazard even though every current caller already passes tenant_id
+// explicitly. Closed while touching this function for the Phase 5
+// archived-filter addition below.
 // ---------------------------------------------------------------------------
 
 export async function listWorkOrders(
-  filters: ListFilters = {}
+  filters: ListFilters
 ): Promise<WorkOrderWithRelations[]> {
-  const tenantId = filters.tenant_id ?? "tenant-showtime";
-
   let query = db
     .from("work_orders")
     .select(WO_SELECT)
-    .eq("tenant_id", tenantId)
+    .eq("tenant_id", filters.tenant_id)
     .order("created_at", { ascending: false });
 
   if (filters.status)            query = query.eq("status", filters.status);
@@ -166,6 +205,7 @@ export async function listWorkOrders(
   if (filters.estimate)          query = query.neq("estimate_handoff_status", EstimateHandoffStatus.NOT_NEEDED);
   if (filters.date)              query = query.eq("scheduled_date", filters.date);
   if (filters.exclude_cancelled) query = query.neq("status", WorkOrderStatus.CANCELLED);
+  if (!filters.include_archived) query = query.is("archived_at", null);
 
   const { data, error } = await query;
   if (error) throw new Error(`[db] listWorkOrders: ${error.message}`);
@@ -213,11 +253,18 @@ export async function findByGhlOpportunityId(
 
 // ---------------------------------------------------------------------------
 // createWorkOrder — called from POST /api/work-orders (UI form)
+//
+// tenantId is required (not defaulted) — this previously fell back to a
+// hardcoded "tenant-showtime" if the caller omitted it, the same
+// tenant-isolation hazard already closed on listWorkOrders. Its one caller
+// already passes tenantId explicitly. Closed while adding Phase 5 child
+// work order support (parentWorkOrderId).
 // ---------------------------------------------------------------------------
 
 export async function createWorkOrder(
   input: NewWorkOrderInput,
-  tenantId = "tenant-showtime"
+  tenantId: string,
+  parentWorkOrderId?: string
 ): Promise<WorkOrderWithRelations> {
   const { data, error } = await db
     .from("work_orders")
@@ -233,12 +280,25 @@ export async function createWorkOrder(
       scheduled_date:   input.scheduled_date ?? null,
       estimate_handoff_status: EstimateHandoffStatus.NOT_NEEDED,
       ghl_sync_failed:  false,
+      parent_work_order_id: parentWorkOrderId ?? null,
     })
     .select(WO_SELECT)
     .single();
 
   if (error) throw new Error(`[db] createWorkOrder: ${error.message}`);
   return mapRow(data as unknown as WoJoinedRow);
+}
+
+/** Child work orders of a project (Phase 5). */
+export async function listChildWorkOrders(parentWorkOrderId: string, tenantId: string): Promise<WorkOrderWithRelations[]> {
+  const { data, error } = await db
+    .from("work_orders")
+    .select(WO_SELECT)
+    .eq("parent_work_order_id", parentWorkOrderId)
+    .eq("tenant_id", tenantId)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(`[db] listChildWorkOrders: ${error.message}`);
+  return (data as unknown as WoJoinedRow[]).map(mapRow);
 }
 
 // ---------------------------------------------------------------------------
@@ -452,17 +512,157 @@ export async function findAnyByGhlOpportunityId(
 }
 
 // ---------------------------------------------------------------------------
-// deleteWorkOrder
+// archiveWorkOrder / restoreWorkOrder
+//
+// Phase 5: business work records are archived, never hard-deleted. This is
+// the direct replacement for the old deleteWorkOrder (which issued a real
+// DELETE). archived_at is an orthogonal soft-delete marker settable from ANY
+// status (mirrors the pricebook/estimate archive pattern) — it hides the
+// record from default list views without forcing it through the formal
+// close/cancel lifecycle first. Distinct from status=ARCHIVED, which is the
+// state-machine-gated terminus reachable only from closed/cancelled (see
+// src/lib/work-orders/state-machine.ts) for staff who want to explicitly
+// finalize an already-closed project.
 // ---------------------------------------------------------------------------
+
+export type WorkOrderActionResult =
+  | { ok: true; data: WorkOrderWithRelations }
+  | { ok: false; notFound: true };
 
 // tenantId is required (not optional) — security-audit M2: an optional
 // parameter meant this function could in principle run tenant-unscoped if a
 // future caller omitted it. It cannot compile without one now.
-export async function deleteWorkOrder(
+export async function archiveWorkOrder(
   id: string,
-  tenantId: string
-): Promise<boolean> {
-  const { error } = await db.from("work_orders").delete().eq("id", id).eq("tenant_id", tenantId);
-  if (error) throw new Error(`[db] deleteWorkOrder: ${error.message}`);
-  return true;
+  tenantId: string,
+  userId: string
+): Promise<WorkOrderActionResult> {
+  const { data, error } = await db
+    .from("work_orders")
+    .update({ archived_at: new Date().toISOString(), archived_by: userId })
+    .eq("id", id)
+    .eq("tenant_id", tenantId)
+    .select(WO_SELECT)
+    .maybeSingle();
+  if (error) throw new Error(`[db] archiveWorkOrder: ${error.message}`);
+  if (!data) return { ok: false, notFound: true };
+  return { ok: true, data: mapRow(data as unknown as WoJoinedRow) };
+}
+
+export async function restoreWorkOrder(id: string, tenantId: string): Promise<WorkOrderActionResult> {
+  const { data, error } = await db
+    .from("work_orders")
+    .update({ archived_at: null, archived_by: null })
+    .eq("id", id)
+    .eq("tenant_id", tenantId)
+    .select(WO_SELECT)
+    .maybeSingle();
+  if (error) throw new Error(`[db] restoreWorkOrder: ${error.message}`);
+  if (!data) return { ok: false, notFound: true };
+  return { ok: true, data: mapRow(data as unknown as WoJoinedRow) };
+}
+
+// ---------------------------------------------------------------------------
+// closeWorkOrder / reopenWorkOrder
+//
+// Both are optimistic-concurrency gated (expectedVersion) and validated
+// against the formal state machine. closeWorkOrder additionally enforces the
+// Phase 5 pending-change-order rule (ADR-0011): a change order with
+// blocks_closeout=true in draft/sent/viewed status blocks closeout.
+// ---------------------------------------------------------------------------
+
+export type WorkOrderTransitionResult =
+  | { ok: true; data: WorkOrderWithRelations }
+  | { ok: false; notFound: true }
+  | { ok: false; conflict: true; currentVersion: number }
+  | { ok: false; invalidTransition: true; from: WorkOrderStatus; to: WorkOrderStatus }
+  | { ok: false; blockedByChangeOrders: true; changeOrderIds: string[] };
+
+/** Exported so the change-order module can reuse the exact same closeout gate. */
+export async function findBlockingChangeOrderIds(workOrderId: string, tenantId: string): Promise<string[]> {
+  const { data, error } = await db
+    .from("change_orders")
+    .select("id")
+    .eq("work_order_id", workOrderId)
+    .eq("tenant_id", tenantId)
+    .eq("blocks_closeout", true)
+    .in("status", ["draft", "sent", "viewed"]);
+  if (error) throw new Error(`[db] findBlockingChangeOrderIds: ${error.message}`);
+  return ((data ?? []) as { id: string }[]).map((r) => r.id);
+}
+
+export async function closeWorkOrder(
+  id: string,
+  tenantId: string,
+  userId: string,
+  expectedVersion: number
+): Promise<WorkOrderTransitionResult> {
+  const existing = await getWorkOrderById(id, tenantId);
+  if (!existing) return { ok: false, notFound: true };
+  if (existing.version !== expectedVersion) {
+    return { ok: false, conflict: true, currentVersion: existing.version };
+  }
+  if (!WORK_ORDER_STATUS_TRANSITIONS[existing.status].includes(WorkOrderStatus.CLOSED)) {
+    return { ok: false, invalidTransition: true, from: existing.status, to: WorkOrderStatus.CLOSED };
+  }
+
+  const blocking = await findBlockingChangeOrderIds(id, tenantId);
+  if (blocking.length > 0) {
+    return { ok: false, blockedByChangeOrders: true, changeOrderIds: blocking };
+  }
+
+  const { data, error } = await db
+    .from("work_orders")
+    .update({
+      status: WorkOrderStatus.CLOSED,
+      closed_at: new Date().toISOString(),
+      closed_by: userId,
+      version: expectedVersion + 1,
+    })
+    .eq("id", id)
+    .eq("tenant_id", tenantId)
+    .eq("version", expectedVersion)
+    .select(WO_SELECT)
+    .maybeSingle();
+  if (error) throw new Error(`[db] closeWorkOrder: ${error.message}`);
+  if (!data) {
+    const fresh = await getWorkOrderById(id, tenantId);
+    return fresh ? { ok: false, conflict: true, currentVersion: fresh.version } : { ok: false, notFound: true };
+  }
+  return { ok: true, data: mapRow(data as unknown as WoJoinedRow) };
+}
+
+export async function reopenWorkOrder(
+  id: string,
+  tenantId: string,
+  expectedVersion: number
+): Promise<WorkOrderTransitionResult> {
+  const existing = await getWorkOrderById(id, tenantId);
+  if (!existing) return { ok: false, notFound: true };
+  if (existing.version !== expectedVersion) {
+    return { ok: false, conflict: true, currentVersion: existing.version };
+  }
+  if (existing.status !== WorkOrderStatus.CLOSED) {
+    return { ok: false, invalidTransition: true, from: existing.status, to: WorkOrderStatus.NEEDS_FOLLOW_UP };
+  }
+
+  const { data, error } = await db
+    .from("work_orders")
+    .update({
+      status: WorkOrderStatus.NEEDS_FOLLOW_UP,
+      reopened_at: new Date().toISOString(),
+      reopen_count: existing.reopen_count + 1,
+      version: expectedVersion + 1,
+    })
+    .eq("id", id)
+    .eq("tenant_id", tenantId)
+    .eq("version", expectedVersion)
+    .select(WO_SELECT)
+    .maybeSingle();
+  if (error) throw new Error(`[db] reopenWorkOrder: ${error.message}`);
+  if (!data) {
+    const fresh = await getWorkOrderById(id, tenantId);
+    return fresh ? { ok: false, conflict: true, currentVersion: fresh.version } : { ok: false, notFound: true };
+  }
+  return { ok: true, data: mapRow(data as unknown as WoJoinedRow) };
 }

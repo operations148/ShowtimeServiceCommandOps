@@ -30,6 +30,12 @@ import {
   Mail,
   Send,
   MessageSquare,
+  Archive,
+  ArchiveRestore,
+  Lock,
+  Unlock,
+  FolderTree,
+  Plus,
 } from "lucide-react";
 import type { StatusHistoryEntry } from "@/app/api/work-orders/[id]/history/route";
 import {
@@ -41,18 +47,31 @@ import {
 } from "@/types/work-order";
 import type { WorkOrderWithRelations } from "@/types/work-order";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
+import { rolePermissions } from "@/config/roles";
+import type { UserRole } from "@/types/technician";
+import { ChangeOrdersPanel } from "@/components/dashboard/ChangeOrdersPanel";
+import { WorkOrderTasksPanel } from "@/components/dashboard/WorkOrderTasksPanel";
+import { WorkOrderAttachmentsPanel } from "@/components/dashboard/WorkOrderAttachmentsPanel";
 import { cn } from "@/lib/utils";
+
+function money(cents: number): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
+}
 
 // ─── Display config ───────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<WorkOrderStatus, { label: string; className: string }> = {
   [WorkOrderStatus.NEW]:             { label: "New",             className: "bg-slate-100 text-slate-600" },
   [WorkOrderStatus.ASSIGNED]:        { label: "Assigned",        className: "bg-blue-50 text-blue-700" },
+  [WorkOrderStatus.SCHEDULED]:       { label: "Scheduled",       className: "bg-indigo-50 text-indigo-700" },
   [WorkOrderStatus.IN_PROGRESS]:     { label: "In Progress",     className: "bg-brand-50 text-brand-700" },
+  [WorkOrderStatus.ON_HOLD]:         { label: "On Hold",         className: "bg-amber-50 text-amber-700" },
   [WorkOrderStatus.COMPLETED]:       { label: "Completed",       className: "bg-emerald-50 text-emerald-700" },
   [WorkOrderStatus.NEEDS_FOLLOW_UP]: { label: "Needs Follow-Up", className: "bg-orange-50 text-orange-700" },
   [WorkOrderStatus.ESTIMATE_NEEDED]: { label: "Estimate Needed", className: "bg-amber-50 text-amber-700" },
+  [WorkOrderStatus.CLOSED]:          { label: "Closed",          className: "bg-violet-50 text-violet-700" },
   [WorkOrderStatus.CANCELLED]:       { label: "Cancelled",       className: "bg-red-50 text-red-500" },
+  [WorkOrderStatus.ARCHIVED]:        { label: "Archived",        className: "bg-slate-100 text-slate-400" },
 };
 
 const PRIORITY_CONFIG: Record<Priority, { label: string; className: string }> = {
@@ -114,7 +133,7 @@ function formatDateTime(isoStr: string): string {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function SectionCard({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
+export function SectionCard({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
   return (
     <div className={cn("rounded-xl border border-border bg-white p-5 shadow-sm", className)}>
       <h3 className="mb-4 text-xs font-semibold uppercase tracking-wider text-slate-400">{title}</h3>
@@ -123,7 +142,7 @@ function SectionCard({ title, children, className }: { title: string; children: 
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
       <dt className="text-xs font-medium text-slate-400">{label}</dt>
@@ -300,6 +319,8 @@ export function WorkOrderDetail({
   visitId?: string;
 }) {
   const { data: session } = useSession();
+  const role = session?.user?.role as UserRole | undefined;
+  const perms = role ? rolePermissions[role] : undefined;
   const [status, setStatus] = useState<WorkOrderStatus>(workOrder.status);
   const [estimateHandoff, setEstimateHandoff] = useState<EstimateHandoffStatus>(
     workOrder.estimate_handoff_status
@@ -324,6 +345,18 @@ export function WorkOrderDetail({
   const [ghlSyncFailed, setGhlSyncFailed] = useState<boolean>(workOrder.ghl_sync_failed ?? false);
   const [retrying, setRetrying]     = useState(false);
   const [downloadingReport, setDownloadingReport] = useState(false);
+
+  // Phase 5: project lifecycle (archive/close/reopen) + multi-day children
+  const [woVersion, setWoVersion]         = useState<number>(workOrder.version);
+  const [archivedAt, setArchivedAt]       = useState<string | null | undefined>(workOrder.archived_at);
+  const [archiving, setArchiving]         = useState(false);
+  const [closing, setClosing]             = useState(false);
+  const [reopening, setReopening]         = useState(false);
+  const [closeBlockedIds, setCloseBlockedIds] = useState<string[] | null>(null);
+  const [children, setChildren]           = useState<WorkOrderWithRelations[]>([]);
+  const [loadingChildren, setLoadingChildren] = useState(false);
+  const [addingChild, setAddingChild]     = useState(false);
+  const [childTitle, setChildTitle]       = useState("");
 
   // Estimate needed dialog
   const [estimateDialogOpen, setEstimateDialogOpen] = useState(false);
@@ -469,6 +502,141 @@ export function WorkOrderDetail({
       setDownloadingReport(false);
     }
   }, [workOrder.id, workOrder.wo_number]);
+
+  // Phase 5: archive / restore / close / reopen — each hits its own dedicated,
+  // version-gated endpoint rather than the generic status PATCH (which has no
+  // pending-change-order block or optimistic-concurrency check).
+  const handleArchive = useCallback(async () => {
+    setArchiving(true);
+    try {
+      const res = await fetch(`/api/work-orders/${workOrder.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        showToast(j.error ?? "Failed to archive work order", "error");
+        return;
+      }
+      setArchivedAt(new Date().toISOString());
+      showToast("Work order archived.");
+    } catch {
+      showToast("Network error — archive not saved", "error");
+    } finally {
+      setArchiving(false);
+    }
+  }, [workOrder.id]);
+
+  const handleRestore = useCallback(async () => {
+    setArchiving(true);
+    try {
+      const res = await fetch(`/api/work-orders/${workOrder.id}/restore`, { method: "POST" });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        showToast(j.error ?? "Failed to restore work order", "error");
+        return;
+      }
+      setArchivedAt(null);
+      showToast("Work order restored.");
+    } catch {
+      showToast("Network error — restore not saved", "error");
+    } finally {
+      setArchiving(false);
+    }
+  }, [workOrder.id]);
+
+  const handleClose = useCallback(async () => {
+    setClosing(true);
+    setCloseBlockedIds(null);
+    try {
+      const res = await fetch(`/api/work-orders/${workOrder.id}/close`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version: woVersion }),
+      });
+      const json = (await res.json()) as { data?: WorkOrderWithRelations; error?: string; changeOrderIds?: string[] };
+      if (!res.ok) {
+        if (json.changeOrderIds) {
+          setCloseBlockedIds(json.changeOrderIds);
+          showToast(json.error ?? "Cannot close — pending change orders", "error");
+        } else {
+          showToast(json.error ?? "Failed to close work order", "error");
+        }
+        return;
+      }
+      if (json.data) {
+        setStatus(json.data.status);
+        setWoVersion(json.data.version);
+      }
+      showToast("Work order closed.");
+      void loadHistory();
+    } catch {
+      showToast("Network error — close not saved", "error");
+    } finally {
+      setClosing(false);
+    }
+  }, [workOrder.id, woVersion, loadHistory]);
+
+  const handleReopen = useCallback(async () => {
+    setReopening(true);
+    try {
+      const res = await fetch(`/api/work-orders/${workOrder.id}/reopen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version: woVersion }),
+      });
+      const json = (await res.json()) as { data?: WorkOrderWithRelations; error?: string };
+      if (!res.ok || !json.data) {
+        showToast(json.error ?? "Failed to reopen work order", "error");
+        return;
+      }
+      setStatus(json.data.status);
+      setWoVersion(json.data.version);
+      showToast("Work order reopened.");
+      void loadHistory();
+    } catch {
+      showToast("Network error — reopen not saved", "error");
+    } finally {
+      setReopening(false);
+    }
+  }, [workOrder.id, woVersion, loadHistory]);
+
+  // Multi-day project children
+  const loadChildren = useCallback(async () => {
+    setLoadingChildren(true);
+    try {
+      const res = await fetch(`/api/work-orders/${workOrder.id}/children`);
+      const json = (await res.json()) as { data?: WorkOrderWithRelations[] };
+      setChildren(json.data ?? []);
+    } catch {
+      // non-fatal
+    } finally {
+      setLoadingChildren(false);
+    }
+  }, [workOrder.id]);
+
+  useEffect(() => {
+    if (workOrder.is_multi_day || workOrder.parent_work_order_id) void loadChildren();
+  }, [workOrder.is_multi_day, workOrder.parent_work_order_id, loadChildren]);
+
+  const handleAddChild = useCallback(async () => {
+    if (!childTitle.trim()) return;
+    setAddingChild(true);
+    try {
+      const res = await fetch(`/api/work-orders/${workOrder.id}/children`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: childTitle.trim() }),
+      });
+      if (res.ok) {
+        setChildTitle("");
+        void loadChildren();
+        showToast("Visit added to project.");
+      } else {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        showToast(j.error ?? "Failed to add visit", "error");
+      }
+    } finally {
+      setAddingChild(false);
+    }
+  }, [workOrder.id, childTitle, loadChildren]);
 
   // Load property list when picker opens
   const openPropertyPicker = useCallback(async () => {
@@ -818,8 +986,11 @@ export function WorkOrderDetail({
             </span>
           )}
 
-          {/* Status change dropdown — filters out ESTIMATE_NEEDED (handled by button) */}
-          {!isTerminal && (
+          {/* Status change dropdown — filters out ESTIMATE_NEEDED (handled by
+              button) and CLOSED/ARCHIVED (only reachable via the dedicated,
+              version-gated Close/Archive actions below, which also enforce
+              the pending-change-order closeout block) */}
+          {!isTerminal && !archivedAt && (
             <div className="relative">
               <select
                 key={status}
@@ -835,16 +1006,82 @@ export function WorkOrderDetail({
                   {savingStatus ? "Saving…" : "Change status…"}
                 </option>
                 {allowedTransitions
-                  .filter((s) => s !== WorkOrderStatus.ESTIMATE_NEEDED)
+                  .filter((s) => s !== WorkOrderStatus.ESTIMATE_NEEDED && s !== WorkOrderStatus.CLOSED && s !== WorkOrderStatus.ARCHIVED)
                   .map((s) => (
                     <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>
                   ))}
               </select>
             </div>
           )}
+
+          {/* Close / Reopen — dedicated, version-gated actions (Phase 5) */}
+          {!archivedAt && perms?.canCloseWorkOrders && status === WorkOrderStatus.COMPLETED && (
+            <button
+              type="button"
+              onClick={handleClose}
+              disabled={closing}
+              className="flex items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 px-3.5 py-2 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 disabled:opacity-50"
+            >
+              {closing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
+              Close
+            </button>
+          )}
+          {!archivedAt && perms?.canCloseWorkOrders && status === WorkOrderStatus.CLOSED && (
+            <button
+              type="button"
+              onClick={handleReopen}
+              disabled={reopening}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50"
+            >
+              {reopening ? <Loader2 className="h-4 w-4 animate-spin" /> : <Unlock className="h-4 w-4" />}
+              Reopen
+            </button>
+          )}
+
+          {/* Archive / Restore — soft-delete, business records are never hard-deleted (Phase 5) */}
+          {perms?.canCreateWorkOrders && (
+            archivedAt ? (
+              <button
+                type="button"
+                onClick={handleRestore}
+                disabled={archiving}
+                className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
+              >
+                {archiving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArchiveRestore className="h-4 w-4" />}
+                Restore
+              </button>
+            ) : (
+              (status === WorkOrderStatus.CLOSED || status === WorkOrderStatus.CANCELLED) && (
+                <button
+                  type="button"
+                  onClick={handleArchive}
+                  disabled={archiving}
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {archiving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />}
+                  Archive
+                </button>
+              )
+            )
+          )}
           </div>
         </div>
       </div>
+
+      {/* Archived banner */}
+      {archivedAt && (
+        <div className="flex items-center gap-2 rounded-lg border border-slate-300 bg-slate-100 px-4 py-3 text-sm text-slate-600">
+          <Archive className="h-4 w-4 shrink-0 text-slate-400" />
+          <span>This work order is archived. Restore it to resume normal changes.</span>
+        </div>
+      )}
+
+      {/* Close blocked by pending change orders */}
+      {closeBlockedIds && closeBlockedIds.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          This work order has {closeBlockedIds.length} pending change order{closeBlockedIds.length !== 1 ? "s" : ""} that must be resolved before closeout. See the Change Orders section below.
+        </div>
+      )}
 
       {/* Estimate Needed Dialog */}
       {estimateDialogOpen && (
@@ -1046,6 +1283,74 @@ export function WorkOrderDetail({
               )}
             </dl>
           </SectionCard>
+
+          {/* Multi-day project: parent link + child visits (Phase 5) */}
+          {(workOrder.parent_work_order_id || workOrder.is_multi_day) && (
+            <SectionCard title="Project">
+              {workOrder.parent_work_order_id && (
+                <p className="mb-3 flex items-center gap-1.5 text-sm text-slate-600">
+                  <FolderTree className="h-3.5 w-3.5 text-slate-400" />
+                  Part of a multi-day project —{" "}
+                  <Link href={`/dashboard/work-orders/${workOrder.parent_work_order_id}`} className="font-medium text-brand-600 hover:underline">
+                    view parent
+                  </Link>
+                </p>
+              )}
+              {workOrder.is_multi_day && (
+                <>
+                  {loadingChildren ? (
+                    <p className="text-sm text-slate-400">Loading visits…</p>
+                  ) : children.length === 0 ? (
+                    <p className="text-sm text-slate-400">No additional visits yet.</p>
+                  ) : (
+                    <ul className="divide-y divide-border">
+                      {children.map((child) => (
+                        <li key={child.id}>
+                          <Link href={`/dashboard/work-orders/${child.id}`} className="flex items-center justify-between gap-3 py-2 hover:bg-slate-50 -mx-1 px-1 rounded-lg">
+                            <span className="text-sm font-medium text-slate-700">{child.title}</span>
+                            <span className="flex items-center gap-1.5 text-xs text-slate-400">
+                              {child.scheduled_date ?? "Unscheduled"}
+                              <ChevronRight className="h-3.5 w-3.5" />
+                            </span>
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {perms?.canCreateWorkOrders && (
+                    <div className="mt-3 flex gap-2">
+                      <input
+                        type="text"
+                        value={childTitle}
+                        onChange={(e) => setChildTitle(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") void handleAddChild(); }}
+                        placeholder="Add another visit (title)…"
+                        className="flex-1 rounded-lg border border-border bg-white px-3 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-400"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddChild}
+                        disabled={addingChild || !childTitle.trim()}
+                        className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        {addingChild ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                        Add
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </SectionCard>
+          )}
+
+          {/* Change Orders (Phase 5) */}
+          <ChangeOrdersPanel workOrderId={workOrder.id} />
+
+          {/* Tasks (Phase 5) */}
+          <WorkOrderTasksPanel workOrderId={workOrder.id} />
+
+          {/* Attachments (Phase 5) */}
+          <WorkOrderAttachmentsPanel workOrderId={workOrder.id} />
 
           {/* Property */}
           <SectionCard title="Property">
@@ -1345,6 +1650,17 @@ export function WorkOrderDetail({
 
         {/* ── Right sidebar ── */}
         <div className="space-y-5 lg:col-span-1">
+
+          {/* Contract Value — financial figures, gated (Phase 5) */}
+          {perms?.canViewFinancialReports && (
+            <SectionCard title="Contract Value">
+              <dl className="space-y-3">
+                <Field label="Approved Contract Amount">{money(workOrder.approved_contract_amount_cents)}</Field>
+                {workOrder.budget_cents != null && <Field label="Budget">{money(workOrder.budget_cents)}</Field>}
+                <Field label="Actual Cost">{money(workOrder.actual_cost_cents)}</Field>
+              </dl>
+            </SectionCard>
+          )}
 
           {/* Assignment */}
           <SectionCard title="Assignment">

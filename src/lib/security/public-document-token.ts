@@ -1,14 +1,15 @@
 import { randomBytes, createHash } from "crypto";
 
 /**
- * Public estimate tokens (Phase 3, ADR-0007).
+ * Public document tokens (Phase 3, ADR-0007; promoted to a shared security
+ * module in Phase 5 when change orders adopted the same pattern as estimates).
  *
  * A high-entropy random token goes in the emailed URL; only its SHA-256 hash
- * is stored (`estimates.public_token_hash`). Lookups are by hash equality on an
- * indexed column — never by iterating rows. This mirrors the invitation /
- * password-reset token design (src/lib/security/tokens.ts) but uses 32 bytes of
- * randomness (256 bits) because the estimate link is longer-lived and exposes a
- * financial document.
+ * is stored (e.g. `estimates.public_token_hash`, `change_orders.public_token_hash`).
+ * Lookups are by hash equality on an indexed column — never by iterating rows.
+ * This mirrors the invitation/password-reset token design (`tokens.ts`) but
+ * uses 32 bytes of randomness (256 bits) because these links are longer-lived
+ * and expose a financial document.
  */
 
 const TOKEN_BYTES = 32; // 256 bits → 43-char base64url

@@ -54,6 +54,14 @@ type VisitRow = {
   version?: number | null;
   ghl_appointment_id?: string | null;
   ghl_sync_state?: string | null;
+  // Phase 5 completion-requirement capture columns
+  customer_signature?: string | null;
+  equipment_reading?: string | null;
+  time_entry_minutes?: number | null;
+  material_usage?: string | null;
+  completion_reason?: string | null;
+  checklist_template_id?: string | null;
+  checklist_template_version?: number | null;
 };
 
 function mapVisitRow(row: VisitRow): Visit {
@@ -87,6 +95,13 @@ function mapVisitRow(row: VisitRow): Visit {
     version:                    row.version ?? 1,
     ghl_appointment_id:         row.ghl_appointment_id ?? null,
     ghl_sync_state:             (row.ghl_sync_state as Visit["ghl_sync_state"]) ?? "none",
+    customer_signature:         row.customer_signature ?? null,
+    equipment_reading:          row.equipment_reading ?? null,
+    time_entry_minutes:         row.time_entry_minutes ?? null,
+    material_usage:             row.material_usage ?? null,
+    completion_reason:          row.completion_reason ?? null,
+    checklist_template_id:      row.checklist_template_id ?? null,
+    checklist_template_version: row.checklist_template_version ?? null,
   };
 }
 
@@ -103,7 +118,7 @@ export type VisitUpdateResult =
 // ---------------------------------------------------------------------------
 
 export interface VisitListFilters {
-  tenant_id?:       string;
+  tenant_id:        string;
   work_order_id?:   string;
   property_id?:     string;
   technician_id?:   string;
@@ -115,10 +130,12 @@ export interface VisitListFilters {
 // listVisits
 // ---------------------------------------------------------------------------
 
-export async function listVisits(
-  filters: VisitListFilters = {}
-): Promise<Visit[]> {
-  const tenantId = filters.tenant_id ?? "tenant-showtime";
+// tenant_id is a required filter (not defaulted) — this previously fell back
+// to a hardcoded "tenant-showtime" if the caller omitted it, the same
+// tenant-isolation hazard already closed on listWorkOrders/createWorkOrder/
+// updateVisit. All existing callers already pass tenant_id explicitly.
+export async function listVisits(filters: VisitListFilters): Promise<Visit[]> {
+  const tenantId = filters.tenant_id;
 
   let query = db
     .from("visits")
@@ -240,10 +257,14 @@ export async function createVisit(
 // updateVisit
 // ---------------------------------------------------------------------------
 
+// tenantId is required (not defaulted) — this previously fell back to a
+// hardcoded "tenant-showtime" if the caller omitted it, the same
+// tenant-isolation hazard already closed on listWorkOrders/createWorkOrder.
+// Its one caller already passes tenantId explicitly.
 export async function updateVisit(
   id: string,
   patch: PatchVisitInput,
-  tenantId = "tenant-showtime"
+  tenantId: string
 ): Promise<VisitUpdateResult> {
   // Verify existence first
   const { data: existing, error: fetchError } = await db
@@ -264,6 +285,11 @@ export async function updateVisit(
   if (patch.completed_at       !== undefined) updatePayload.completed_at       = patch.completed_at;
   if (patch.completion_message !== undefined) updatePayload.completion_message = patch.completion_message;
   if (patch.completed_by_name  !== undefined) updatePayload.completed_by_name  = patch.completed_by_name;
+  if (patch.customer_signature !== undefined) updatePayload.customer_signature = patch.customer_signature;
+  if (patch.equipment_reading  !== undefined) updatePayload.equipment_reading  = patch.equipment_reading;
+  if (patch.time_entry_minutes !== undefined) updatePayload.time_entry_minutes = patch.time_entry_minutes;
+  if (patch.material_usage     !== undefined) updatePayload.material_usage    = patch.material_usage;
+  if (patch.completion_reason  !== undefined) updatePayload.completion_reason = patch.completion_reason;
   if (patch.checklist          !== undefined) {
     updatePayload.checklist = patch.checklist as unknown as Record<string, unknown>[];
   }

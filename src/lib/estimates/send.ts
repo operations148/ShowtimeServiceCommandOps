@@ -2,7 +2,7 @@ import { db } from "@/lib/db/client";
 import { EstimateStatus } from "@/types/estimate";
 import { getEstimateById, getEstimateLines, recordEstimateEvent } from "@/lib/db/queries/estimates";
 import { canTransition } from "@/lib/estimates/state-machine";
-import { generatePublicToken } from "@/lib/estimates/public-token";
+import { generatePublicToken } from "@/lib/security/public-document-token";
 import { safeSend } from "@/lib/email/safe-mailer";
 import { buildProposalEmailHtml, buildProposalEmailText } from "@/lib/email/templates/estimate-proposal";
 

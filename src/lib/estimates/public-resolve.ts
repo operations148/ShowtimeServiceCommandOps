@@ -1,7 +1,7 @@
 import { db } from "@/lib/db/client";
 import type { Estimate } from "@/types/estimate";
 import { resolveEstimateByTokenHash } from "@/lib/db/queries/estimates";
-import { hashPublicToken, checkTokenValidity } from "@/lib/estimates/public-token";
+import { hashPublicToken, checkTokenValidity } from "@/lib/security/public-document-token";
 import type { TenantBranding } from "@/lib/estimates/public-serializer";
 import { logger } from "@/lib/security/logger";
 

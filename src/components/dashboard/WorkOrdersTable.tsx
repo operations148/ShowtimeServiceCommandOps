@@ -27,11 +27,15 @@ import { LoadingTableRows } from "@/components/ui/LoadingState";
 const STATUS_CONFIG: Record<WorkOrderStatus, { label: string; className: string }> = {
   [WorkOrderStatus.NEW]:             { label: "New",             className: "bg-slate-100 text-slate-600" },
   [WorkOrderStatus.ASSIGNED]:        { label: "Assigned",        className: "bg-blue-50 text-blue-700" },
+  [WorkOrderStatus.SCHEDULED]:       { label: "Scheduled",       className: "bg-indigo-50 text-indigo-700" },
   [WorkOrderStatus.IN_PROGRESS]:     { label: "In Progress",     className: "bg-brand-50 text-brand-700" },
+  [WorkOrderStatus.ON_HOLD]:         { label: "On Hold",         className: "bg-amber-50 text-amber-700" },
   [WorkOrderStatus.COMPLETED]:       { label: "Completed",       className: "bg-emerald-50 text-emerald-700" },
   [WorkOrderStatus.NEEDS_FOLLOW_UP]: { label: "Needs Follow-Up", className: "bg-orange-50 text-orange-700" },
   [WorkOrderStatus.ESTIMATE_NEEDED]: { label: "Estimate Needed", className: "bg-amber-50 text-amber-700" },
+  [WorkOrderStatus.CLOSED]:          { label: "Closed",          className: "bg-violet-50 text-violet-700" },
   [WorkOrderStatus.CANCELLED]:       { label: "Cancelled",       className: "bg-red-50 text-red-500" },
+  [WorkOrderStatus.ARCHIVED]:        { label: "Archived",        className: "bg-slate-100 text-slate-400" },
 };
 
 const PRIORITY_CONFIG: Record<Priority, { label: string; className: string }> = {

@@ -66,3 +66,49 @@ export async function validateAndReencodeImage(
 
   return { ok: true, image: { buffer: reencoded, mime: sniffed.mime, ext: sniffed.ext } };
 }
+
+/**
+ * Generic document/attachment validation (Phase 5, work-order attachments).
+ * Unlike images, arbitrary documents (PDFs, etc.) cannot be re-encoded to
+ * strip metadata — the meaningful control here is magic-byte sniffing so a
+ * disguised executable renamed "invoice.pdf" is rejected, plus a size cap.
+ * The buffer is returned unmodified (no re-encoding step exists for PDFs).
+ */
+const ALLOWED_ATTACHMENT_MIMES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+]);
+
+export interface ValidatedAttachment {
+  buffer: Buffer;
+  mime: string;
+  ext: string;
+}
+
+export type AttachmentValidationResult =
+  | { ok: true; file: ValidatedAttachment }
+  | { ok: false; reason: string };
+
+export async function validateAttachment(
+  input: Buffer,
+  { maxSizeBytes }: ValidateImageOptions
+): Promise<AttachmentValidationResult> {
+  if (input.length === 0) {
+    return { ok: false, reason: "File is empty." };
+  }
+  if (input.length > maxSizeBytes) {
+    return {
+      ok: false,
+      reason: `File too large. Maximum size is ${Math.round(maxSizeBytes / (1024 * 1024))} MB.`,
+    };
+  }
+
+  const sniffed = await fileTypeFromBuffer(input);
+  if (!sniffed || !ALLOWED_ATTACHMENT_MIMES.has(sniffed.mime)) {
+    return { ok: false, reason: "Unsupported file type. Use JPEG, PNG, WebP, or PDF." };
+  }
+
+  return { ok: true, file: { buffer: input, mime: sniffed.mime, ext: sniffed.ext } };
+}

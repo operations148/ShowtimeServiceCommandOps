@@ -43,11 +43,15 @@ const STATUS_CONFIG: Record<
 > = {
   [WorkOrderStatus.NEW]:             { label: "Scheduled",       badge: "bg-slate-100 text-slate-600",    icon: Clock         },
   [WorkOrderStatus.ASSIGNED]:        { label: "Scheduled",       badge: "bg-slate-100 text-slate-600",    icon: Clock         },
+  [WorkOrderStatus.SCHEDULED]:       { label: "Scheduled",       badge: "bg-indigo-50 text-indigo-700",   icon: Clock         },
   [WorkOrderStatus.IN_PROGRESS]:     { label: "In Progress",     badge: "bg-brand-50 text-brand-700",     icon: Wrench        },
+  [WorkOrderStatus.ON_HOLD]:         { label: "On Hold",         badge: "bg-amber-50 text-amber-700",     icon: AlertTriangle },
   [WorkOrderStatus.COMPLETED]:       { label: "Completed",       badge: "bg-emerald-50 text-emerald-700", icon: CheckCircle2  },
   [WorkOrderStatus.NEEDS_FOLLOW_UP]: { label: "Follow-up",       badge: "bg-purple-50 text-purple-700",   icon: AlertTriangle },
   [WorkOrderStatus.ESTIMATE_NEEDED]: { label: "Estimate Needed", badge: "bg-amber-50 text-amber-700",     icon: AlertTriangle },
+  [WorkOrderStatus.CLOSED]:          { label: "Closed",          badge: "bg-violet-50 text-violet-700",   icon: CheckCircle2  },
   [WorkOrderStatus.CANCELLED]:       { label: "Cancelled",       badge: "bg-red-50 text-red-600",         icon: AlertTriangle },
+  [WorkOrderStatus.ARCHIVED]:        { label: "Archived",        badge: "bg-slate-100 text-slate-400",    icon: Clock         },
 };
 
 const PRIORITY_CONFIG: Record<Priority, { label: string; bar: string; badge: string }> = {

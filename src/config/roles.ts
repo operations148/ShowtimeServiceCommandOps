@@ -55,6 +55,28 @@ export interface RolePermissions {
   // isTechnicianScoped) and get neither flag.
   canViewSchedule: boolean;
   canManageSchedule: boolean;
+
+  // Work-order project expansion (Phase 5). canCreateWorkOrders still gates
+  // create/archive/restore (the old delete-permission slot). These add the
+  // more deliberate lifecycle actions and the internal task/attachment
+  // surface, which technicians can update for their own assigned tasks but
+  // not manage broadly.
+  canCloseWorkOrders: boolean;
+  canManageWorkOrderTasks: boolean;
+  canManageWorkOrderAttachments: boolean;
+  canManageChecklistTemplates: boolean;
+  canManageCompletionRequirements: boolean;
+
+  // Change orders (Phase 5). Mirrors the estimate permission shape.
+  // canSendEstimateEmail (Phase 1) is reused for the manual-send gate rather
+  // than adding a parallel flag, since it already represents "this role may
+  // trigger a customer-facing send."
+  canViewChangeOrders: boolean;
+  canManageChangeOrders: boolean;
+  canVoidChangeOrders: boolean;
+  canOverrideChangeOrderLock: boolean;
+  /** Applying an accepted change order's schedule impact to a visit (ADR-0011). */
+  canApplyScheduleImpact: boolean;
 }
 
 export const rolePermissions: Record<UserRole, RolePermissions> = {
@@ -88,6 +110,16 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canVoidEstimates: true,
     canViewSchedule: true,
     canManageSchedule: true,
+    canCloseWorkOrders: true,
+    canManageWorkOrderTasks: true,
+    canManageWorkOrderAttachments: true,
+    canManageChecklistTemplates: true,
+    canManageCompletionRequirements: true,
+    canViewChangeOrders: true,
+    canManageChangeOrders: true,
+    canVoidChangeOrders: true,
+    canOverrideChangeOrderLock: true,
+    canApplyScheduleImpact: true,
   },
   [UserRole.TENANT_ADMIN]: {
     canViewAllWorkOrders: true,
@@ -119,6 +151,16 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canVoidEstimates: true,
     canViewSchedule: true,
     canManageSchedule: true,
+    canCloseWorkOrders: true,
+    canManageWorkOrderTasks: true,
+    canManageWorkOrderAttachments: true,
+    canManageChecklistTemplates: true,
+    canManageCompletionRequirements: true,
+    canViewChangeOrders: true,
+    canManageChangeOrders: true,
+    canVoidChangeOrders: true,
+    canOverrideChangeOrderLock: true,
+    canApplyScheduleImpact: true,
   },
   [UserRole.OFFICE_STAFF]: {
     canViewAllWorkOrders: true,
@@ -153,6 +195,18 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     // Office staff run scheduling/dispatch (per the role table in CLAUDE.md §7).
     canViewSchedule: true,
     canManageSchedule: true,
+    // Office staff run day-to-day project ops but cannot void a change order
+    // or override an accepted-lock without escalation.
+    canCloseWorkOrders: true,
+    canManageWorkOrderTasks: true,
+    canManageWorkOrderAttachments: true,
+    canManageChecklistTemplates: true,
+    canManageCompletionRequirements: false,
+    canViewChangeOrders: true,
+    canManageChangeOrders: true,
+    canVoidChangeOrders: false,
+    canOverrideChangeOrderLock: false,
+    canApplyScheduleImpact: true,
   },
   [UserRole.TECHNICIAN]: {
     canViewAllWorkOrders: false,
@@ -189,6 +243,18 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     // calendar/dispatch surface.
     canViewSchedule: false,
     canManageSchedule: false,
+    // Technicians can complete their own assigned tasks (route-level ownership
+    // check, not this flag) but have no broader project-management surface.
+    canCloseWorkOrders: false,
+    canManageWorkOrderTasks: false,
+    canManageWorkOrderAttachments: false,
+    canManageChecklistTemplates: false,
+    canManageCompletionRequirements: false,
+    canViewChangeOrders: false,
+    canManageChangeOrders: false,
+    canVoidChangeOrders: false,
+    canOverrideChangeOrderLock: false,
+    canApplyScheduleImpact: false,
   },
   [UserRole.READ_ONLY_OWNER]: {
     canViewAllWorkOrders: true,
@@ -223,5 +289,16 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     // Owner can view the schedule read-only but cannot dispatch.
     canViewSchedule: true,
     canManageSchedule: false,
+    // Read-only across the board for project/change-order data.
+    canCloseWorkOrders: false,
+    canManageWorkOrderTasks: false,
+    canManageWorkOrderAttachments: false,
+    canManageChecklistTemplates: false,
+    canManageCompletionRequirements: false,
+    canViewChangeOrders: true,
+    canManageChangeOrders: false,
+    canVoidChangeOrders: false,
+    canOverrideChangeOrderLock: false,
+    canApplyScheduleImpact: false,
   },
 };
