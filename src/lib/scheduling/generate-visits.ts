@@ -1,16 +1,29 @@
 /**
  * Server-only — generates recurring work orders and visits for active schedules.
- * Idempotent: checks for existing work orders before creating.
+ *
+ * Idempotency is now DOUBLE-guarded (Phase 4):
+ *   1. app-layer existence check (fast path, avoids a wasted insert), and
+ *   2. the DB UNIQUE(recurring_schedule_id, scheduled_date) index — a
+ *      concurrent or replayed run that races past the check hits 23505 and is
+ *      counted as a skip, so duplicates are impossible.
+ *
+ * Occurrence dates come from the shared, tested recurrence module
+ * (src/lib/scheduling/recurrence.ts) using the tenant timezone, honoring
+ * paused schedules and skip exceptions (src/lib/scheduling/timezone.ts).
  */
 
 import { db } from "@/lib/db/client";
-import { ScheduleFrequency } from "@/types/recurring-schedule";
 import { WorkOrderStatus, Priority, ServiceCategory } from "@/types/work-order";
 import { VisitStatus } from "@/types/visit";
 import { listRecurringSchedules } from "@/lib/db/queries/recurring-schedules";
+import { getTenantTimezone } from "@/lib/db/queries/tenant-settings";
 import { checklistTemplates } from "@/config/checklist-templates";
+import { expandRecurrence, type Frequency } from "@/lib/scheduling/recurrence";
+import { localToday, addDaysToDateStr } from "@/lib/scheduling/timezone";
 import type { RecurringScheduleWithRelations } from "@/types/recurring-schedule";
 import type { ChecklistItem } from "@/types/visit";
+
+const PG_UNIQUE_VIOLATION = "23505";
 
 const CATEGORY_LABELS: Record<ServiceCategory, string> = {
   [ServiceCategory.WEEKLY_POOL_MAINTENANCE]:    "Weekly Pool Maintenance",
@@ -26,77 +39,18 @@ const CATEGORY_LABELS: Record<ServiceCategory, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Date helpers
+// Per-schedule pause + exception lookup (Phase 4)
 // ---------------------------------------------------------------------------
 
-function toDateStr(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-/** Returns all target dates for a schedule within [windowStart, windowEnd]. */
-function computeTargetDates(
-  schedule: RecurringScheduleWithRelations,
-  windowStart: Date,
-  windowEnd: Date
-): string[] {
-  const startsOn = new Date(schedule.starts_on + "T00:00:00");
-  const endsOn   = schedule.ends_on ? new Date(schedule.ends_on + "T23:59:59") : null;
-
-  const dates: string[] = [];
-  const cursor = new Date(Math.max(windowStart.getTime(), startsOn.getTime()));
-
-  // Advance cursor to the first occurrence of day_of_week on or after cursor
-  const targetDay = schedule.day_of_week;
-  const daysUntilTarget = (targetDay - cursor.getDay() + 7) % 7;
-  cursor.setDate(cursor.getDate() + daysUntilTarget);
-
-  if (schedule.frequency === ScheduleFrequency.BIWEEKLY) {
-    // Align to the schedule's starts_on week parity
-    const msPerWeek = 7 * 24 * 60 * 60 * 1000;
-    const refDay = new Date(startsOn);
-    const refDayAdj = (targetDay - refDay.getDay() + 7) % 7;
-    refDay.setDate(refDay.getDate() + refDayAdj);
-
-    const weeksDiff = Math.round((cursor.getTime() - refDay.getTime()) / msPerWeek);
-    if (weeksDiff % 2 !== 0) {
-      cursor.setDate(cursor.getDate() + 7);
-    }
-  }
-
-  const step = schedule.frequency === ScheduleFrequency.MONTHLY ? null : (
-    schedule.frequency === ScheduleFrequency.BIWEEKLY ? 14 : 7
-  );
-
-  if (schedule.frequency === ScheduleFrequency.MONTHLY) {
-    // Monthly: same day-of-month as starts_on, on or after cursor
-    const dayOfMonth = startsOn.getDate();
-    let year  = cursor.getFullYear();
-    let month = cursor.getMonth();
-
-    while (true) {
-      const candidate = new Date(year, month, dayOfMonth);
-      if (candidate > windowEnd) break;
-      if (endsOn && candidate > endsOn) break;
-      if (candidate >= windowStart && candidate.getDay() === targetDay) {
-        dates.push(toDateStr(candidate));
-      } else if (candidate >= windowStart) {
-        // Use the day-of-month regardless of day_of_week for monthly
-        dates.push(toDateStr(candidate));
-      }
-      month++;
-      if (month > 11) { month = 0; year++; }
-    }
-  } else {
-    // Weekly or biweekly — step forward by fixed interval
-    while (cursor <= windowEnd) {
-      if (!endsOn || cursor <= endsOn) {
-        dates.push(toDateStr(cursor));
-      }
-      cursor.setDate(cursor.getDate() + step!);
-    }
-  }
-
-  return dates;
+async function getScheduleControls(scheduleId: string, tenantId: string): Promise<{ pausedAt: string | null; exceptions: string[] }> {
+  const [{ data: sched }, { data: exRows }] = await Promise.all([
+    db.from("recurring_schedules").select("paused_at").eq("id", scheduleId).eq("tenant_id", tenantId).maybeSingle(),
+    db.from("recurring_exceptions").select("exception_date").eq("schedule_id", scheduleId).eq("tenant_id", tenantId),
+  ]);
+  return {
+    pausedAt: (sched as { paused_at?: string | null } | null)?.paused_at ?? null,
+    exceptions: ((exRows ?? []) as { exception_date: string }[]).map((r) => r.exception_date),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -119,19 +73,30 @@ function buildChecklist(category: ServiceCategory): ChecklistItem[] {
 
 export async function generateVisitsForSchedule(
   schedule: RecurringScheduleWithRelations,
-  weeksAhead = 4
+  weeksAhead = 4,
+  timeZone?: string
 ): Promise<{ created: number; skipped: number }> {
-  const today     = new Date();
-  today.setHours(0, 0, 0, 0);
-  const windowEnd = new Date(today);
-  windowEnd.setDate(windowEnd.getDate() + weeksAhead * 7);
+  const tz = timeZone ?? (await getTenantTimezone(schedule.tenant_id));
+  const windowStart = localToday(tz);
+  const windowEnd = addDaysToDateStr(windowStart, weeksAhead * 7);
 
-  const targetDates = computeTargetDates(schedule, today, windowEnd);
+  const { pausedAt, exceptions } = await getScheduleControls(schedule.id, schedule.tenant_id);
+
+  const targetDates = expandRecurrence(
+    {
+      frequency: schedule.frequency as unknown as Frequency,
+      dayOfWeek: schedule.day_of_week,
+      startsOn: schedule.starts_on,
+      endsOn: schedule.ends_on ?? null,
+      pausedAt,
+    },
+    { windowStart, windowEnd, exceptions }
+  );
   let created = 0;
   let skipped = 0;
 
   for (const dateStr of targetDates) {
-    // Idempotency check: skip if a WO already exists for this schedule+date
+    // Fast-path idempotency: skip if a WO already exists for this schedule+date.
     const { data: existing } = await db
       .from("work_orders")
       .select("id")
@@ -170,6 +135,12 @@ export async function generateVisitsForSchedule(
       .single();
 
     if (woError || !wo) {
+      // 23505 = the DB UNIQUE(recurring_schedule_id, scheduled_date) index
+      // caught a concurrent/replayed run — count as skip, never a duplicate.
+      if (woError?.code === PG_UNIQUE_VIOLATION) {
+        skipped++;
+        continue;
+      }
       console.error(`[scheduling] Failed to create WO for schedule ${schedule.id} on ${dateStr}:`, woError?.message);
       continue;
     }
@@ -208,12 +179,14 @@ export async function generateAllActiveVisits(
   weeksAhead = 4
 ): Promise<{ created: number; skipped: number; schedules: number }> {
   const schedules = await listRecurringSchedules({ tenant_id: tenantId, is_active: true });
+  // Resolve the tenant timezone once, not per schedule.
+  const timeZone = await getTenantTimezone(tenantId);
 
   let totalCreated = 0;
   let totalSkipped = 0;
 
   for (const schedule of schedules) {
-    const result = await generateVisitsForSchedule(schedule, weeksAhead);
+    const result = await generateVisitsForSchedule(schedule, weeksAhead, timeZone);
     totalCreated += result.created;
     totalSkipped += result.skipped;
   }

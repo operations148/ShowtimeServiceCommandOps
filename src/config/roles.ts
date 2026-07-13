@@ -47,6 +47,14 @@ export interface RolePermissions {
   canViewEstimates: boolean;
   canManageEstimates: boolean;
   canVoidEstimates: boolean;
+
+  // Dispatch & scheduling (Phase 4). canAssignTechnicians (existing) still gates
+  // assignment; these add the calendar/visits-admin read surface and the
+  // broader schedule-management actions (reschedule, blocked time, recurring
+  // pause/skip). Technicians remain scoped to their own visits (see
+  // isTechnicianScoped) and get neither flag.
+  canViewSchedule: boolean;
+  canManageSchedule: boolean;
 }
 
 export const rolePermissions: Record<UserRole, RolePermissions> = {
@@ -78,6 +86,8 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canViewEstimates: true,
     canManageEstimates: true,
     canVoidEstimates: true,
+    canViewSchedule: true,
+    canManageSchedule: true,
   },
   [UserRole.TENANT_ADMIN]: {
     canViewAllWorkOrders: true,
@@ -107,6 +117,8 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canViewEstimates: true,
     canManageEstimates: true,
     canVoidEstimates: true,
+    canViewSchedule: true,
+    canManageSchedule: true,
   },
   [UserRole.OFFICE_STAFF]: {
     canViewAllWorkOrders: true,
@@ -138,6 +150,9 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canViewEstimates: true,
     canManageEstimates: true,
     canVoidEstimates: false,
+    // Office staff run scheduling/dispatch (per the role table in CLAUDE.md §7).
+    canViewSchedule: true,
+    canManageSchedule: true,
   },
   [UserRole.TECHNICIAN]: {
     canViewAllWorkOrders: false,
@@ -170,6 +185,10 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canViewEstimates: false,
     canManageEstimates: false,
     canVoidEstimates: false,
+    // Technicians see only their own visits (isTechnicianScoped) — no admin
+    // calendar/dispatch surface.
+    canViewSchedule: false,
+    canManageSchedule: false,
   },
   [UserRole.READ_ONLY_OWNER]: {
     canViewAllWorkOrders: true,
@@ -201,5 +220,8 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canViewEstimates: true,
     canManageEstimates: false,
     canVoidEstimates: false,
+    // Owner can view the schedule read-only but cannot dispatch.
+    canViewSchedule: true,
+    canManageSchedule: false,
   },
 };

@@ -40,10 +40,16 @@ export const adminNavItems: NavItem[] = [
     roles: [UserRole.PLATFORM_OWNER, UserRole.TENANT_ADMIN],
   },
   {
+    label: "Dispatch",
+    href: "/dashboard/schedule",
+    icon: "CalendarClock",
+    roles: [UserRole.PLATFORM_OWNER, UserRole.TENANT_ADMIN, UserRole.OFFICE_STAFF, UserRole.READ_ONLY_OWNER],
+  },
+  {
     label: "Visits",
     href: "/dashboard/visits",
     icon: "CalendarCheck",
-    roles: [UserRole.PLATFORM_OWNER, UserRole.TENANT_ADMIN, UserRole.OFFICE_STAFF],
+    roles: [UserRole.PLATFORM_OWNER, UserRole.TENANT_ADMIN, UserRole.OFFICE_STAFF, UserRole.READ_ONLY_OWNER],
   },
   {
     label: "Estimates",
