@@ -1,30 +1,23 @@
 /**
  * Server-only — never import in client components.
  * Avatars bucket is public; getPublicUrl() returns a stable CDN URL.
+ *
+ * File validation (magic-byte sniff + metadata strip) happens in the route
+ * via src/lib/security/file-validation.ts before this module is called —
+ * uploadAvatar takes an already-validated, re-encoded buffer.
  */
 
 import { db } from "@/lib/db/client";
 
 const AVATAR_BUCKET = process.env.AVATAR_BUCKET ?? "avatars";
-const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
-const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-
-export function validateAvatarFile(file: Blob): string | null {
-  if (!ALLOWED_TYPES.has(file.type)) {
-    return "Unsupported file type. Use JPEG, PNG, or WebP.";
-  }
-  if (file.size > MAX_SIZE_BYTES) {
-    return "File too large. Maximum size is 5 MB.";
-  }
-  return null;
-}
+export const AVATAR_MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 
 export async function uploadAvatar(
   userId: string,
-  file: Blob,
-  filename: string
+  buffer: Buffer,
+  mime: string,
+  ext: string
 ): Promise<string> {
-  const ext = filename.split(".").pop() ?? "jpg";
   const path = `${userId}/${Date.now()}.${ext}`;
 
   // Remove existing avatars for this user before uploading the new one
@@ -41,7 +34,7 @@ export async function uploadAvatar(
 
   const { error } = await db.storage
     .from(AVATAR_BUCKET)
-    .upload(path, file, { upsert: true, contentType: file.type });
+    .upload(path, buffer, { upsert: true, contentType: mime });
 
   if (error) throw new Error(`[storage] Avatar upload failed: ${error.message}`);
 

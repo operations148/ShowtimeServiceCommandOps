@@ -237,9 +237,11 @@ export async function createWorkOrderFromGHLStage(
     customerName
   );
 
+  // Logged by WO number/property-linked flag only -- customerName is PII and
+  // doesn't add debugging value once the WO number is present (security-audit M15).
   console.log(
     `${tag} Created WO ${workOrder.wo_number} ` +
-    `category="${workOrder.service_category}" customer="${customerName}" ` +
+    `category="${workOrder.service_category}" ` +
     `scheduledDate="${scheduledDate ?? "none"}" propertyLinked=${!!property}`
   );
 

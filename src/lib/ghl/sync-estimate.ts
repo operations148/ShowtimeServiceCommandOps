@@ -13,6 +13,7 @@ import { EstimateHandoffStatus } from "@/types/work-order";
 import { getWorkOrderById, updateWorkOrder } from "@/lib/db/queries/work-orders";
 import { markEstimateHandoffSentToGHL } from "@/lib/db/queries/estimate-handoffs";
 import { createTask } from "./client";
+import { enqueueGhlSync } from "./sync-outbox";
 
 // Default due date offset: 24 hours from task creation.
 const DUE_DATE_OFFSET_MS = 24 * 60 * 60 * 1000;
@@ -72,4 +73,22 @@ export async function syncEstimateToGhl(visit: Visit): Promise<void> {
     `retries=${result.retriesUsed} | ` +
     `error: ${result.error}`
   );
+
+  // Durable retry — this previously had no retry path at all (security-audit
+  // L7 covered only the opportunity_won job type; task_create silently
+  // dropped on failure until an admin noticed the stuck FLAGGED status).
+  await enqueueGhlSync({
+    type: "task_create",
+    ghl_opportunity_id: workOrder.ghl_opportunity_id,
+    work_order_id: workOrder.id,
+    tenant_id: workOrder.tenant_id,
+    payload: {
+      title: `Estimate Needed — ${workOrder.property_address}`,
+      body: visit.technician_notes ?? undefined,
+      assignedTo,
+      dueDate,
+      status: "incompleted",
+    },
+    lastError: result.error,
+  });
 }

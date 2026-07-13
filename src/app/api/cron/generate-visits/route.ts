@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { db } from "@/lib/db/client";
 import { generateAllActiveVisits } from "@/lib/scheduling/generate-visits";
+import { logger } from "@/lib/security/logger";
 
 /**
  * GET /api/cron/generate-visits
@@ -12,11 +14,29 @@ import { generateAllActiveVisits } from "@/lib/scheduling/generate-visits";
  * and configure the same value in vercel.json cron authorization.
  */
 
+function constantTimeEquals(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf8");
+  const bufB = Buffer.from(b, "utf8");
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
 export async function GET(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
-  const authHeader = request.headers.get("authorization");
 
-  if (secret && authHeader !== `Bearer ${secret}`) {
+  // Fail CLOSED when the secret is unset (security-audit H3 — the previous
+  // `if (secret && authHeader !== ...)` check short-circuited to `false` and
+  // let every request through unauthenticated when CRON_SECRET was missing).
+  if (!secret) {
+    // user_activity_log requires a real tenant/user FK, so a system-level
+    // misconfiguration like this is recorded via the structured logger
+    // (ingested by the platform's log sink) rather than the tenant audit log.
+    logger.error("[cron/generate-visits] CRON_SECRET is not configured — rejecting request");
+    return NextResponse.json({ error: "Cron not configured" }, { status: 503 });
+  }
+
+  const authHeader = request.headers.get("authorization") ?? "";
+  if (!constantTimeEquals(authHeader, `Bearer ${secret}`)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

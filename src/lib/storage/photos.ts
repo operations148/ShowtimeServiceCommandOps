@@ -46,7 +46,7 @@ export function parseUploadedAt(path: string): number {
 export async function uploadJobPhoto(
   visitId: string,
   tenantId: string,
-  blob: Blob,
+  buffer: Buffer,
   filename: string,
   mimetype: string
 ): Promise<UploadedPhoto> {
@@ -54,7 +54,7 @@ export async function uploadJobPhoto(
 
   const { error: uploadError } = await db.storage
     .from(BUCKET)
-    .upload(path, blob, { contentType: mimetype, upsert: false });
+    .upload(path, buffer, { contentType: mimetype, upsert: false });
 
   if (uploadError) {
     throw new Error(`[storage] Upload failed: ${uploadError.message}`);

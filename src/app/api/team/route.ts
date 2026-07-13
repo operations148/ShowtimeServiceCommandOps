@@ -4,6 +4,8 @@ import { randomBytes } from 'crypto'
 import { requireApiAuth, requirePermission, getTenantId } from '@/lib/auth/api-auth'
 import { db } from '@/lib/db/client'
 import { sendInviteEmail } from '@/lib/email/invite'
+import { generateToken, hashToken } from '@/lib/security/tokens'
+import { recordAuditEvent } from '@/lib/security/audit'
 import type { TeamMember } from '@/types/team'
 
 const TEAM_ROLES = ['tenant_admin', 'office_staff', 'read_only_owner'] as const
@@ -89,11 +91,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to create team member' }, { status: 500 })
   }
 
-  // Create invite token
+  // Create invite token — generated here, only the hash is persisted
+  // (security-audit M11: the token was previously stored/compared in plaintext).
+  const token = generateToken()
+  const tokenHash = hashToken(token)
+
   const { data: invite, error: inviteError } = await db
     .from('user_invitations')
-    .insert({ user_id: newMember.id, tenant_id: tenantId })
-    .select('token')
+    .insert({ user_id: newMember.id, tenant_id: tenantId, token_hash: tokenHash })
+    .select('id')
     .single()
 
   if (inviteError || !invite) {
@@ -110,9 +116,18 @@ export async function POST(request: NextRequest) {
     const companyName = tenant?.name ?? 'ServiceOps'
 
     // Fire-and-forget — never block the 201 response for email failures
-    void sendInviteEmail(email, name, role, companyName, invite.token as string).catch(err =>
+    void sendInviteEmail(email, name, role, companyName, token).catch(err =>
       console.error('[email] invite send failed:', err)
     )
+
+    void recordAuditEvent({
+      tenantId,
+      userId: auth.session.user.id,
+      actionType: 'invitation.created',
+      description: `Invited ${email} as ${role}`,
+      entityType: 'user',
+      entityId: newMember.id,
+    })
   }
 
   return NextResponse.json({ data: newMember as TeamMember }, { status: 201 })

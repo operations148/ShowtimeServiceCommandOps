@@ -355,7 +355,7 @@ function CompanyProfileSection() {
               <input
                 ref={logoInputRef}
                 type="file"
-                accept="image/jpeg,image/png,image/webp,image/svg+xml"
+                accept="image/jpeg,image/png,image/webp"
                 className="sr-only"
                 onChange={handleLogoUpload}
               />

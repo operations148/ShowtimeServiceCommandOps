@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import { PatchWorkOrderSchema } from "@/lib/validation/work-order";
 import {
   getWorkOrderById,
@@ -232,13 +233,12 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     (retryGhlSync === true && workOrder.ghl_sync_failed === true);
 
   if (shouldSync) {
-    const syncPromise = syncCompletionToGhl(updatedWo).catch(console.error);
-    // waitUntil keeps the sync alive past the HTTP response in serverless
-    // environments (Vercel Edge / Next.js). Falls back to fire-and-forget.
-    if (typeof (globalThis as Record<string, unknown>).waitUntil === "function") {
-      (globalThis as unknown as { waitUntil: (p: Promise<unknown>) => void }).waitUntil(syncPromise);
-    }
-    // syncPromise is already floating — no else needed.
+    // after() schedules the callback to run once the response has been sent,
+    // but keeps the serverless function instance alive until it finishes —
+    // fixing a prior check against `globalThis.waitUntil`, which is not a
+    // real API in this runtime and always evaluated false, silently reducing
+    // this to an un-awaited floating promise (security-audit L6).
+    after(() => syncCompletionToGhl(updatedWo).catch((err) => console.error("[after] syncCompletionToGhl failed:", err)));
   }
 
   return NextResponse.json({ data: updatedWo });

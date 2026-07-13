@@ -2,6 +2,8 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { requirePermission, getTenantId } from '@/lib/auth/api-auth'
 import { db } from '@/lib/db/client'
 import { sendInviteEmail } from '@/lib/email/invite'
+import { generateToken, hashToken } from '@/lib/security/tokens'
+import { recordAuditEvent } from '@/lib/security/audit'
 import type { TeamMemberRole } from '@/types/team'
 
 export async function POST(
@@ -36,11 +38,14 @@ export async function POST(
     .eq('user_id', id)
     .is('accepted_at', null)
 
-  // Create a fresh invitation token
+  // Create a fresh invitation token — only the hash is persisted (M11)
+  const token = generateToken()
+  const tokenHash = hashToken(token)
+
   const { data: invite, error: inviteError } = await db
     .from('user_invitations')
-    .insert({ user_id: id, tenant_id: tenantId })
-    .select('token')
+    .insert({ user_id: id, tenant_id: tenantId, token_hash: tokenHash })
+    .select('id')
     .single()
 
   if (inviteError || !invite) {
@@ -56,8 +61,17 @@ export async function POST(
 
   const companyName = tenant?.name ?? 'ServiceOps'
 
-  void sendInviteEmail(member.email, member.name, member.role as TeamMemberRole, companyName, invite.token as string)
+  void sendInviteEmail(member.email, member.name, member.role as TeamMemberRole, companyName, token)
     .catch(err => console.error('[email] resend-invite failed:', err))
+
+  void recordAuditEvent({
+    tenantId,
+    userId: auth.session.user.id,
+    actionType: 'invitation.resent',
+    description: `Resent invitation to ${member.email}`,
+    entityType: 'user',
+    entityId: id,
+  })
 
   return NextResponse.json({ success: true })
 }

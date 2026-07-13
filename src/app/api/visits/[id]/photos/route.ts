@@ -7,10 +7,10 @@ import {
   getSignedPhotos,
   deleteJobPhoto,
 } from "@/lib/storage/photos";
+import { validateAndReencodeImage } from "@/lib/security/file-validation";
 
 const MAX_PHOTOS = 10;
 const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
-const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -110,26 +110,20 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "Missing file field" }, { status: 422 });
   }
 
-  if (!ALLOWED_TYPES.has(file.type)) {
-    return NextResponse.json(
-      { error: "Unsupported file type. Use JPEG, PNG, or WebP." },
-      { status: 422 }
-    );
+  // Magic-byte sniff + re-encode (strips EXIF/GPS — a technician's phone
+  // photo would otherwise retain embedded location data in the stored file)
+  // rather than trusting the client-supplied Content-Type (security-audit M4/M6).
+  const inputBuffer = Buffer.from(await file.arrayBuffer());
+  const validated = await validateAndReencodeImage(inputBuffer, { maxSizeBytes: MAX_SIZE_BYTES });
+  if (!validated.ok) {
+    return NextResponse.json({ error: validated.reason }, { status: 422 });
   }
 
-  if (file.size > MAX_SIZE_BYTES) {
-    return NextResponse.json(
-      { error: "File too large. Maximum size is 10 MB." },
-      { status: 422 }
-    );
-  }
-
-  const filename =
-    file instanceof File ? file.name : `photo-${Date.now()}.jpg`;
+  const filename = `photo-${Date.now()}.${validated.image.ext}`;
 
   let uploaded;
   try {
-    uploaded = await uploadJobPhoto(id, tenantId, file, filename, file.type);
+    uploaded = await uploadJobPhoto(id, tenantId, validated.image.buffer, filename, validated.image.mime);
   } catch (err) {
     console.error("[api] POST /api/visits/[id]/photos upload:", err);
     return NextResponse.json({ error: "Upload failed. Please try again." }, { status: 500 });
@@ -193,8 +187,11 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "Visit not found" }, { status: 404 });
   }
 
-  // Validate this path belongs to this visit's tenant (path starts with tenantId/)
-  if (!path.startsWith(`${tenantId}/`)) {
+  // Validate this path belongs to THIS visit specifically (security-audit M7 —
+  // the prior check only verified the tenant-id prefix, so any user who owned
+  // some visit in the tenant could delete another visit's photo by supplying
+  // its path). photo_urls is the authoritative membership list for this visit.
+  if (!(visit.photo_urls ?? []).includes(path)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

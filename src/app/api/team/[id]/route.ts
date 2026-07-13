@@ -3,6 +3,9 @@ import { z } from 'zod'
 import bcrypt from 'bcryptjs'
 import { requirePermission, getTenantId } from '@/lib/auth/api-auth'
 import { db } from '@/lib/db/client'
+import { bumpSessionVersion } from '@/lib/auth/trusted-context'
+import { recordAuditEvent } from '@/lib/security/audit'
+import { checkPasswordStrength } from '@/lib/security/password-policy'
 import type { TeamMember } from '@/types/team'
 
 export async function DELETE(
@@ -46,6 +49,11 @@ export async function DELETE(
     return NextResponse.json({ error: 'Failed to delete team member' }, { status: 500 })
   }
 
+  void recordAuditEvent({
+    tenantId, userId: auth.session.user.id, actionType: 'user.deleted',
+    description: 'Deleted team member', entityType: 'user', entityId: id,
+  })
+
   return NextResponse.json({ success: true })
 }
 
@@ -84,7 +92,7 @@ export async function PATCH(
 
   const { data: existing } = await db
     .from('users')
-    .select('id, email, role')
+    .select('id, email, role, is_active')
     .eq('id', id)
     .eq('tenant_id', tenantId)
     .not('role', 'eq', 'technician')
@@ -95,6 +103,13 @@ export async function PATCH(
   }
 
   const { name, email, phone, role, is_active, new_password } = result.data
+
+  if (new_password) {
+    const strength = checkPasswordStrength(new_password)
+    if (!strength.ok) {
+      return NextResponse.json({ error: strength.reason }, { status: 422 })
+    }
+  }
 
   if (email && email !== existing.email) {
     const { data: conflict } = await db
@@ -127,6 +142,37 @@ export async function PATCH(
   if (updateError) {
     console.error('[api] PATCH /api/team/[id] failed:', updateError)
     return NextResponse.json({ error: 'Failed to update team member' }, { status: 500 })
+  }
+
+  // Bump session_version whenever role, active state, or password changes —
+  // any already-issued JWT for this user is invalidated on its next request
+  // (security-audit H2 — deactivation/role changes previously had no effect
+  // until the 8h JWT naturally expired).
+  if (role !== undefined || is_active !== undefined || new_password) {
+    await bumpSessionVersion(id, tenantId)
+  }
+
+  if (role !== undefined && role !== existing.role) {
+    void recordAuditEvent({
+      tenantId, userId: auth.session.user.id, actionType: 'user.role_changed',
+      description: `Changed role from ${existing.role} to ${role}`,
+      entityType: 'user', entityId: id,
+    })
+  }
+  if (is_active !== undefined && is_active !== existing.is_active) {
+    void recordAuditEvent({
+      tenantId, userId: auth.session.user.id,
+      actionType: is_active ? 'user.reactivated' : 'user.deactivated',
+      description: is_active ? 'Reactivated team member' : 'Deactivated team member',
+      entityType: 'user', entityId: id,
+    })
+  }
+  if (new_password) {
+    void recordAuditEvent({
+      tenantId, userId: auth.session.user.id, actionType: 'password.admin_reset',
+      description: 'Admin reset team member password',
+      entityType: 'user', entityId: id,
+    })
   }
 
   return NextResponse.json({ data: updated as TeamMember })

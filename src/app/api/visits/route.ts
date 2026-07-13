@@ -1,7 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { CreateVisitSchema } from "@/lib/validation/visit";
 import { listVisits, createVisit } from "@/lib/db/queries/visits";
+import { getWorkOrderById } from "@/lib/db/queries/work-orders";
+import { getPropertyById } from "@/lib/db/queries/properties";
+import { db } from "@/lib/db/client";
 import { VisitStatus } from "@/types/visit";
+import { UserRole } from "@/types/technician";
 import { requireApiAuth, isTechnicianScoped, getTenantId } from "@/lib/auth/api-auth";
 
 // ---------------------------------------------------------------------------
@@ -102,8 +106,44 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const input = result.data;
+
+  // security-audit M8: previously no verification that work_order_id/
+  // property_id belonged to the caller's tenant, and technician_id was
+  // caller-suppliable with no scoping — a technician could create a visit
+  // against another tenant's work order or attribute it to a different
+  // technician.
+  const [workOrder, property] = await Promise.all([
+    getWorkOrderById(input.work_order_id, tenantId),
+    getPropertyById(input.property_id, tenantId),
+  ]);
+
+  if (!workOrder) {
+    return NextResponse.json({ error: "work_order_id not found for this tenant" }, { status: 422 });
+  }
+  if (!property) {
+    return NextResponse.json({ error: "property_id not found for this tenant" }, { status: 422 });
+  }
+
+  if (isTechnicianScoped(auth.session)) {
+    // Technicians can only create visits attributed to themselves, regardless
+    // of what technician_id the request body supplied.
+    input.technician_id = auth.session.user.technician_id;
+  } else if (input.technician_id) {
+    const { data: technician } = await db
+      .from("users")
+      .select("id")
+      .eq("id", input.technician_id)
+      .eq("tenant_id", tenantId)
+      .eq("role", UserRole.TECHNICIAN)
+      .maybeSingle();
+    if (!technician) {
+      return NextResponse.json({ error: "technician_id not found for this tenant" }, { status: 422 });
+    }
+  }
+
   try {
-    const created = await createVisit(result.data, tenantId);
+    const created = await createVisit(input, tenantId);
     return NextResponse.json({ data: created }, { status: 201 });
   } catch (err) {
     console.error("[api] POST /api/visits failed:", err);

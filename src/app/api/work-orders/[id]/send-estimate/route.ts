@@ -1,9 +1,10 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { requireApiAuth, getTenantId } from '@/lib/auth/api-auth'
+import { requirePermission, getTenantId } from '@/lib/auth/api-auth'
 import { supabaseAdmin } from '@/lib/db/supabase'
 import { getResend } from '@/lib/email/resend'
 import { buildEstimateEmailHtml, buildEstimateEmailText } from '@/lib/email/templates/estimate-needed'
+import { checkRateLimit } from '@/lib/security/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,11 +16,22 @@ const BodySchema = z.object({
 type RouteContext = { params: Promise<{ id: string }> }
 
 export async function POST(req: NextRequest, { params }: RouteContext) {
-  const auth = await requireApiAuth()
+  // security-audit H4: this route previously used bare requireApiAuth() with
+  // no permission or ownership check, letting any authenticated role
+  // (including an unrelated TECHNICIAN) email an arbitrary attacker-supplied
+  // address the work order's gate code, access notes, and customer address.
+  const auth = await requirePermission('canSendEstimateEmail')
   if (!auth.ok) return auth.response
 
   const tenantId = getTenantId(auth.session)
   const { id } = await params
+
+  // Rate limited — this is an email-sending primitive with no prior limit,
+  // making it usable to spam an arbitrary target inbox.
+  const limit = await checkRateLimit(`${tenantId}:${auth.session.user.id}`, 'adminAction')
+  if (!limit.allowed) {
+    return NextResponse.json({ error: 'Too many requests. Please try again shortly.' }, { status: 429 })
+  }
 
   let body: unknown
   try { body = await req.json() } catch {
