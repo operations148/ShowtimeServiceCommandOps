@@ -77,6 +77,14 @@ export interface RolePermissions {
   canOverrideChangeOrderLock: boolean;
   /** Applying an accepted change order's schedule impact to a visit (ADR-0011). */
   canApplyScheduleImpact: boolean;
+
+  // Invoices & payments (Phase 6). canManageInvoices and canRefundPayments
+  // already exist (Phase 1); this adds the read flag so READ_ONLY_OWNER can
+  // see invoices without managing them (same view/manage split as estimates
+  // and change orders). Stripe Connect onboarding rides canManageSettings;
+  // manual send rides canSendEstimateEmail (same reuse rationale as change
+  // orders — one "may trigger a customer-facing send" flag).
+  canViewInvoices: boolean;
 }
 
 export const rolePermissions: Record<UserRole, RolePermissions> = {
@@ -120,6 +128,7 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canVoidChangeOrders: true,
     canOverrideChangeOrderLock: true,
     canApplyScheduleImpact: true,
+    canViewInvoices: true,
   },
   [UserRole.TENANT_ADMIN]: {
     canViewAllWorkOrders: true,
@@ -161,6 +170,7 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canVoidChangeOrders: true,
     canOverrideChangeOrderLock: true,
     canApplyScheduleImpact: true,
+    canViewInvoices: true,
   },
   [UserRole.OFFICE_STAFF]: {
     canViewAllWorkOrders: true,
@@ -207,6 +217,8 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canVoidChangeOrders: false,
     canOverrideChangeOrderLock: false,
     canApplyScheduleImpact: true,
+    // Office staff run billing day-to-day (canManageInvoices: true) — view rides along.
+    canViewInvoices: true,
   },
   [UserRole.TECHNICIAN]: {
     canViewAllWorkOrders: false,
@@ -255,6 +267,8 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canVoidChangeOrders: false,
     canOverrideChangeOrderLock: false,
     canApplyScheduleImpact: false,
+    // No billing surface for technicians.
+    canViewInvoices: false,
   },
   [UserRole.READ_ONLY_OWNER]: {
     canViewAllWorkOrders: true,
@@ -300,5 +314,7 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canVoidChangeOrders: false,
     canOverrideChangeOrderLock: false,
     canApplyScheduleImpact: false,
+    // Read-only owner sees invoices/payments but cannot manage them.
+    canViewInvoices: true,
   },
 };
