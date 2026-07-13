@@ -1,0 +1,4 @@
+# Force LF line endings for shell scripts regardless of the checking-out OS's
+# core.autocrlf setting — CRLF breaks bash parsing on Vercel's Linux build
+# environment (build-time scripts like validate-env.sh must stay LF).
+*.sh text eol=lf
