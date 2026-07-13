@@ -26,7 +26,18 @@ export type AuditActionType =
   | "file.uploaded"
   | "file.deleted"
   | "ghl.credential_replaced"
-  | "report.exported";
+  | "report.exported"
+  // Pricebook (Phase 2) — price/cost changes are financially sensitive
+  | "pricebook.category_created"
+  | "pricebook.category_updated"
+  | "pricebook.category_archived"
+  | "pricebook.category_restored"
+  | "pricebook.item_created"
+  | "pricebook.item_updated"
+  | "pricebook.item_archived"
+  | "pricebook.item_restored"
+  | "pricebook.bundle_updated"
+  | "pricebook.exported";
 
 export interface AuditEntry {
   tenantId: string;

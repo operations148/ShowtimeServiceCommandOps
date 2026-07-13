@@ -11,6 +11,7 @@ import {
   CalendarCheck,
   FileText,
   BarChart2,
+  BookOpen,
   Settings,
   Sun,
   type LucideIcon,
@@ -27,6 +28,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   CalendarCheck,
   FileText,
   BarChart2,
+  BookOpen,
   Settings,
   Sun,
 };

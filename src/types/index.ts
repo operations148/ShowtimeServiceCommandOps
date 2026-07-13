@@ -6,4 +6,6 @@ export * from "./visit";
 export * from "./technician";
 export * from "./tenant";
 export * from "./ghl";
-export * from "./estimate";
+// Invoice types (src/types/invoice.ts) are imported directly via "@/types/invoice"
+// — the authoritative money-domain model since Phase 2 schema reconciliation
+// deleted the conflicting, unreferenced ./estimate module.

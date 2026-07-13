@@ -58,6 +58,13 @@ export const adminNavItems: NavItem[] = [
     roles: [UserRole.PLATFORM_OWNER, UserRole.TENANT_ADMIN, UserRole.OFFICE_STAFF],
   },
   {
+    // Mirrors canViewPricebook: technicians excluded (server enforces regardless)
+    label: "Pricebook",
+    href: "/dashboard/pricebook",
+    icon: "BookOpen",
+    roles: [UserRole.PLATFORM_OWNER, UserRole.TENANT_ADMIN, UserRole.OFFICE_STAFF, UserRole.READ_ONLY_OWNER],
+  },
+  {
     label: "Reports",
     href: "/dashboard/reports",
     icon: "BarChart2",

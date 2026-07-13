@@ -204,6 +204,25 @@ Two entirely separate, incompatible domain models both claim the name "Invoice":
 
 This is exactly the "two incompatible invoice or estimate state machines" risk the Phase 2 prompt anticipates. Phase 2's schema-reconciliation task should either delete `src/types/estimate.ts`'s unused `Invoice`/`InvoiceItem`/`Payment` types outright (if truly dead) or formally absorb its `Estimate` concept into a real, migrated `estimates` table as part of the Phase 3 full-estimate work — not both files coexisting silently.
 
+> **RESOLVED (Phase 2):** `src/types/estimate.ts` was confirmed to have zero importers and was deleted. `src/types/invoice.ts` (5-state enum matching the DB `invoice_status`) is the single authoritative invoice model. The `estimates` table/type will be designed fresh in Phase 3 on top of the pricebook + snapshot foundation. Migration `20260711000002` also added tracked baseline `CREATE TABLE IF NOT EXISTS` definitions for the previously dashboard-only `invoices`/`invoice_line_items` tables.
+
+## Phase 2 additions (migration 20260711000002)
+
+| Table | Purpose | Key columns |
+|---|---|---|
+| `document_sequences` | Tenant-scoped, transaction-safe document numbering (replaces app-layer `COUNT(*)+1`) | PK `(tenant_id, doc_type)`; `doc_type ∈ {invoice, estimate, change_order, payment}`; `next_value BIGINT`. Claimed atomically via `next_document_number(uuid, text)` — single `INSERT … ON CONFLICT DO UPDATE … RETURNING`; concurrent callers serialize on the row lock. Deny-all RLS (service_role only); EXECUTE revoked from anon/authenticated. Backfill seeds the invoice sequence above the highest already-issued `INV-*` number. |
+| `pricebook_categories` | Tenant-scoped item grouping | `UNIQUE (tenant_id, name)`, `sort_order`, `is_active`, soft archive (`archived_at`), `version` (optimistic concurrency), created/updated by/at |
+| `pricebook_items` | The catalog: services, labor, materials, equipment, fees, discounts, bundles | `item_type` enum `pricebook_item_type`; `customer_price`/`internal_cost` INTEGER cents; `default_quantity NUMERIC(12,3)`; `taxable`, `tax_category`, `vendor_reference`, `image_path`, `notes`, `is_active`, `sort_order`; soft archive; `version` doubles as optimistic-concurrency token and snapshot source version |
+| `pricebook_bundle_items` | Bundle composition (single-level; nesting is rejected at the API layer) | `UNIQUE (bundle_id, child_item_id)`, `CHECK (bundle_id <> child_item_id)`, `quantity NUMERIC(12,3)` |
+
+`invoice_line_items` gained snapshot columns: `unit`, `unit_cost` (cents, internal), `taxable`, `tax_category`, `discount_amount`, `markup_percent`, `source_pricebook_item_id` (FK → pricebook_items, `ON DELETE SET NULL`), `source_pricebook_version`. Line items are immutable snapshots — editing a pricebook item never mutates existing document lines (see ADR-0006).
+
+New enum: `pricebook_item_type` = service, labor, material, equipment, fee, discount, bundle.
+
+Pricebook RLS follows the standard pattern (select on tenant match; writes additionally require `tenant_admin`/`office_staff`/`platform_owner`) with the same "correctly designed, currently unreachable" caveat as everything else — application-layer enforcement (`requirePermission` + `tenant_id` on every query + server-side `internal_cost` redaction) is the active control.
+
+New storage bucket: `PRICEBOOK_IMAGE_BUCKET` (default `pricebook-images`, public — catalog imagery only, no PII by design). Same dashboard-configured-ACL caveat as the other buckets.
+
 ## RLS policy summary
 
 Every tenant-owned table has RLS **enabled**. All policies gate on `current_tenant_id()`, `current_user_id()`, `current_user_role()` — three SQL helper functions (migration 20260506000011) that resolve via `COALESCE((auth.jwt() ->> 'x')::type, current_setting('app.current_x', true))`.
