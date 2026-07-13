@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/drain-ghl-outbox",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 7 * * *"
     }
   ]
 }
