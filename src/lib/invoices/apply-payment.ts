@@ -6,7 +6,6 @@ import {
   insertLedgerRow,
   sumInvoiceLedger,
   getPaymentById,
-  type LedgerRowInput,
 } from '@/lib/db/queries/payments'
 import { isPayable, deriveStatusAfterLedgerChange, canTransition } from './state-machine'
 import { amountDue } from '@/lib/money/money'

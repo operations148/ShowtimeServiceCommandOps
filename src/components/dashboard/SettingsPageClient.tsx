@@ -23,6 +23,7 @@ import {
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { cn } from "@/lib/utils";
 import type { CompanyProfile } from "@/app/api/settings/company/route";
+import { StripeConnectSection } from "@/components/dashboard/StripeConnectSection";
 
 // ─── Copy button ─────────────────────────────────────────────────────────────
 
@@ -509,6 +510,7 @@ export function SettingsPageClient() {
 
       {/* Live sections */}
       <CompanyProfileSection />
+      <StripeConnectSection />
       <GHLIntegrationSection />
       <TeamMembersSection />
 
