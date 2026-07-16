@@ -16,6 +16,7 @@ import {
   BookOpen,
   Settings,
   Sun,
+  Contact,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -35,6 +36,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   BookOpen,
   Settings,
   Sun,
+  Contact,
 };
 
 interface SidebarNavItemProps {
