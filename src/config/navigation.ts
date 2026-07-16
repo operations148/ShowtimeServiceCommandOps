@@ -40,6 +40,13 @@ export const adminNavItems: NavItem[] = [
     roles: [UserRole.PLATFORM_OWNER, UserRole.TENANT_ADMIN],
   },
   {
+    // Mirrors canManagePortalUsers (platform_owner + tenant_admin only)
+    label: "Portal Users",
+    href: "/dashboard/portal-users",
+    icon: "Contact",
+    roles: [UserRole.PLATFORM_OWNER, UserRole.TENANT_ADMIN],
+  },
+  {
     label: "Dispatch",
     href: "/dashboard/schedule",
     icon: "CalendarClock",

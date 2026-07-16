@@ -39,6 +39,13 @@ export const RATE_LIMIT_POLICIES = {
   // more frequent than decisions; decisions are additionally one-shot by status.
   publicEstimateView:   { windowSeconds: 60,      max: 30 },
   publicEstimateDecision: { windowSeconds: 60 * 60, max: 10 },
+  // Customer portal (Phase 7). Link request is strict (email enumeration /
+  // spam); magic-link consume is one-shot but rate-limited defensively;
+  // authenticated views/actions mirror the public estimate cadence.
+  portalLinkRequest:    { windowSeconds: 60 * 60, max: 5 },
+  portalAuth:           { windowSeconds: 60 * 60, max: 10 },
+  portalView:           { windowSeconds: 60,      max: 60 },
+  portalAction:         { windowSeconds: 60 * 60, max: 20 },
 } as const satisfies Record<string, RateLimitPolicy>;
 
 export type RateLimitPolicyName = keyof typeof RATE_LIMIT_POLICIES;

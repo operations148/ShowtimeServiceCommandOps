@@ -191,3 +191,16 @@ describe("invoice + payment permission matrix (Phase 6)", () => {
     }
   });
 });
+
+describe("customer-portal admin permission matrix (Phase 7)", () => {
+  it("only tenant admin and platform owner can manage portal users", () => {
+    expect(rolePermissions[UserRole.PLATFORM_OWNER].canManagePortalUsers).toBe(true);
+    expect(rolePermissions[UserRole.TENANT_ADMIN].canManagePortalUsers).toBe(true);
+  });
+
+  it("office staff, technicians, and read-only owners cannot manage portal users", () => {
+    expect(rolePermissions[UserRole.OFFICE_STAFF].canManagePortalUsers).toBe(false);
+    expect(rolePermissions[UserRole.TECHNICIAN].canManagePortalUsers).toBe(false);
+    expect(rolePermissions[UserRole.READ_ONLY_OWNER].canManagePortalUsers).toBe(false);
+  });
+});

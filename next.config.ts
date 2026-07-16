@@ -60,6 +60,18 @@ const nextConfig: NextConfig = withPWA({
         source: "/:path*",
         headers: securityHeaders,
       },
+      {
+        // Customer portal (Phase 7): sensitive per-customer data must never be
+        // cached by browsers, proxies, or the bfcache. Applies to portal pages
+        // and portal API responses. The service worker precaches static JS/CSS
+        // only — never these routes — so no-store here is the whole story.
+        source: "/portal/:path*",
+        headers: [{ key: "Cache-Control", value: "no-store, no-cache, must-revalidate, private" }],
+      },
+      {
+        source: "/api/portal/:path*",
+        headers: [{ key: "Cache-Control", value: "no-store, no-cache, must-revalidate, private" }],
+      },
     ];
   },
 } satisfies NextConfig);
