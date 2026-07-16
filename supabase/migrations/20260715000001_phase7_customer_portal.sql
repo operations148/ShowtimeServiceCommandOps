@@ -19,6 +19,14 @@
 -- =============================================================================
 
 -- ---------------------------------------------------------------------------
+-- 0. tenants.portal_booking_url — tenant-configured deep link to the approved
+--    GHL booking experience (the portal never builds its own booking engine;
+--    "book a visit" links out to GHL when this is set).
+-- ---------------------------------------------------------------------------
+ALTER TABLE tenants
+  ADD COLUMN IF NOT EXISTS portal_booking_url TEXT;
+
+-- ---------------------------------------------------------------------------
 -- 1. portal_customers
 --
 -- session_version bumps to revoke ALL of a customer's sessions at once (same
