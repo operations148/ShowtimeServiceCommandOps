@@ -101,7 +101,13 @@ export type AuditActionType =
   | "stripe.onboarding_started"
   | "stripe.account_updated"
   | "reconciliation.run"
-  | "reconciliation.finding_resolved";
+  | "reconciliation.finding_resolved"
+  // Customer portal (Phase 7)
+  | "portal_user.invited"
+  | "portal_user.updated"
+  | "portal_user.access_revoked"
+  | "portal_user.reinvited"
+  | "portal_user.sessions_revoked";
 
 export interface AuditEntry {
   tenantId: string;

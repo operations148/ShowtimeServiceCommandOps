@@ -85,6 +85,12 @@ export interface RolePermissions {
   // manual send rides canSendEstimateEmail (same reuse rationale as change
   // orders — one "may trigger a customer-facing send" flag).
   canViewInvoices: boolean;
+
+  // Customer portal admin (Phase 7). Invite/enable/revoke portal customers,
+  // review access history + sessions, resend secure invites. A customer-
+  // facing surface, so treated like team/settings management (not office
+  // staff by default — it grants a customer login to tenant data).
+  canManagePortalUsers: boolean;
 }
 
 export const rolePermissions: Record<UserRole, RolePermissions> = {
@@ -129,6 +135,7 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canOverrideChangeOrderLock: true,
     canApplyScheduleImpact: true,
     canViewInvoices: true,
+    canManagePortalUsers: true,
   },
   [UserRole.TENANT_ADMIN]: {
     canViewAllWorkOrders: true,
@@ -171,6 +178,7 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canOverrideChangeOrderLock: true,
     canApplyScheduleImpact: true,
     canViewInvoices: true,
+    canManagePortalUsers: true,
   },
   [UserRole.OFFICE_STAFF]: {
     canViewAllWorkOrders: true,
@@ -219,6 +227,7 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canApplyScheduleImpact: true,
     // Office staff run billing day-to-day (canManageInvoices: true) — view rides along.
     canViewInvoices: true,
+    canManagePortalUsers: false,
   },
   [UserRole.TECHNICIAN]: {
     canViewAllWorkOrders: false,
@@ -269,6 +278,7 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canApplyScheduleImpact: false,
     // No billing surface for technicians.
     canViewInvoices: false,
+    canManagePortalUsers: false,
   },
   [UserRole.READ_ONLY_OWNER]: {
     canViewAllWorkOrders: true,
@@ -316,5 +326,6 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canApplyScheduleImpact: false,
     // Read-only owner sees invoices/payments but cannot manage them.
     canViewInvoices: true,
+    canManagePortalUsers: false,
   },
 };
