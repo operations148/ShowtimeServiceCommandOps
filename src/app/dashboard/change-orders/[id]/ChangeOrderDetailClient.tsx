@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
   Loader2,
@@ -14,6 +15,7 @@ import {
   Copy,
   Check,
   CalendarClock,
+  Receipt,
 } from "lucide-react";
 import { ChangeOrderStatus, type ChangeOrder, type ChangeOrderEvent, type ChangeOrderVersion } from "@/types/change-order";
 import type { Visit } from "@/types/visit";
@@ -43,6 +45,7 @@ const STATUS_BADGE: Record<ChangeOrderStatus, string> = {
 };
 
 export function ChangeOrderDetailClient({ id }: { id: string }) {
+  const router = useRouter();
   const { data: session } = useSession();
   const role = session?.user?.role as UserRole | undefined;
   const perms = role ? rolePermissions[role] : undefined;
@@ -202,6 +205,22 @@ export function ChangeOrderDetailClient({ id }: { id: string }) {
     });
   }
 
+  async function handleCreateInvoice() {
+    await doAction(async () => {
+      const res = await fetch(`/api/change-orders/${id}/invoice`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const json = (await res.json()) as { data?: { id: string }; error?: string };
+      if (!res.ok || !json.data) {
+        setActionErr(json.error ?? "Failed to create invoice");
+        return;
+      }
+      router.push(`/dashboard/invoices/${json.data.id}`);
+    });
+  }
+
   function copyLink() {
     if (!publicUrl) return;
     void navigator.clipboard.writeText(publicUrl).then(() => {
@@ -232,6 +251,7 @@ export function ChangeOrderDetailClient({ id }: { id: string }) {
   const canOverride = perms?.canOverrideChangeOrderLock ?? false;
   const canViewCosts = perms?.canViewItemCosts ?? false;
   const canApplySchedule = perms?.canApplyScheduleImpact ?? false;
+  const canInvoice = perms?.canManageInvoices ?? false;
   const overridable = [ChangeOrderStatus.ACCEPTED, ChangeOrderStatus.REJECTED, ChangeOrderStatus.EXPIRED].includes(co.status);
   const scheduleImpactReady = co.status === ChangeOrderStatus.ACCEPTED && !!co.schedule_impact_days && !co.schedule_impact_applied_at;
 
@@ -289,6 +309,11 @@ export function ChangeOrderDetailClient({ id }: { id: string }) {
           {scheduleImpactReady && canApplySchedule && (
             <button type="button" onClick={openSchedulePanel} className="inline-flex items-center gap-2 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-100">
               <CalendarClock className="h-4 w-4" /> Apply Schedule Impact
+            </button>
+          )}
+          {co.status === ChangeOrderStatus.ACCEPTED && canInvoice && (
+            <button type="button" onClick={handleCreateInvoice} disabled={busy} className="inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 shadow-sm hover:bg-emerald-100 disabled:opacity-50">
+              <Receipt className="h-4 w-4" /> Create Invoice
             </button>
           )}
           {overridable && canOverride && (

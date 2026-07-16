@@ -1,17 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { getStripeClient } from '@/lib/stripe/client'
+import { verifyCheckoutSession } from '@/lib/stripe/verify-event'
 import { getTenantByStripeAccountId } from '@/lib/db/queries/tenants'
-import { markDepositPaid, getInvoiceById } from '@/lib/db/queries/invoices'
+import { getInvoiceById } from '@/lib/db/queries/invoices'
+import { applyPayment, applyRefund } from '@/lib/invoices/apply-payment'
 import { db } from '@/lib/db/client'
 import { logger } from '@/lib/security/logger'
 
 // Stripe signature verification requires the raw body and Node.js crypto
 export const runtime = 'nodejs'
 
+/**
+ * Stripe Connect webhook (Phase 6 rewrite, ADR-0012/0013).
+ *
+ * For every event: verify signature → store/receipt-check the event id
+ * (duplicate → done) → resolve the tenant from the connected account →
+ * verify metadata/amount/currency against the server-resolved invoice →
+ * apply the transition through the ledger (idempotent) → audit → generic 200.
+ *
+ * Retry/dead-letter: verification failures (forged/mismatched data) are
+ * terminal — marked done-with-detail and 200'd so Stripe stops redelivering.
+ * TRANSIENT failures (out-of-order events, DB errors) are marked 'error' and
+ * returned 500 so Stripe's own retry schedule redelivers; rows stuck in
+ * 'error' are the dead-letter queue the reconciliation job surfaces.
+ */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const body = await req.text()
-  const sig  = req.headers.get('stripe-signature') ?? ''
+  const sig = req.headers.get('stripe-signature') ?? ''
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET
 
   if (!webhookSecret) {
@@ -24,13 +40,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     event = getStripeClient().webhooks.constructEvent(body, sig, webhookSecret)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error(`[webhook] signature verification failed: ${msg}`)
-    return NextResponse.json({ error: `Signature verification failed: ${msg}` }, { status: 400 })
+    logger.warn('[webhook] signature verification failed', { error: msg })
+    return NextResponse.json({ error: 'Signature verification failed' }, { status: 400 })
   }
 
-  // ── Idempotency on event.id ─────────────────────────────────────────────────
-  // Stripe's own event.id is a stable, unique identifier (unlike GHL's custom
-  // webhook payloads) — dedup on it directly rather than a payload hash.
+  // ── Event receipt + duplicate check (Stripe event.id is stable/unique) ─────
   const { data: existingEvent } = await db
     .from('webhook_events')
     .select('id, processing_status')
@@ -50,12 +64,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   async function markProcessed(status: 'done' | 'error', error?: string) {
-    await db.from('webhook_events')
+    await db
+      .from('webhook_events')
       .update({ processing_status: status, processed_at: new Date().toISOString(), last_error: error ?? null })
-      .eq('provider', 'stripe').eq('event_id', event.id)
+      .eq('provider', 'stripe')
+      .eq('event_id', event.id)
   }
 
-  // All Connect events carry the connected account ID
+  // All Connect events carry the connected account id — resolve the tenant
+  // from it, never from anything inside the payload.
   const stripeAccountId = event.account
   if (!stripeAccountId) {
     logger.warn('[webhook] event has no account field — ignoring', { eventId: event.id })
@@ -74,52 +91,105 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object
-        const invoiceId = session.metadata?.invoice_id
-        const metadataTenantId = session.metadata?.tenant_id
         const pi = session.payment_intent
-        const paymentIntentId = typeof pi === 'string' ? pi : (pi?.id ?? null)
+        const invoiceId = session.metadata?.invoice_id
 
-        if (!invoiceId || !paymentIntentId) {
-          logger.warn('[webhook] checkout.session.completed missing invoice_id or payment_intent', { sessionId: session.id })
-          break
-        }
+        // Resolve the invoice UNDER THE RESOLVED TENANT (cross-tenant ids miss).
+        const invoice = invoiceId ? await getInvoiceById(invoiceId, tenant.id) : undefined
 
-        // Server-owned metadata check — the tenant_id in the session's own
-        // metadata (set by us at checkout-session creation) must match the
-        // tenant resolved from the connected account. A mismatch means the
-        // session was not created for the connected account it's arriving on.
-        if (metadataTenantId && metadataTenantId !== tenant.id) {
-          logger.error('[webhook] tenant_id mismatch between session metadata and connected account', {
-            sessionId: session.id, expectedTenant: tenant.id,
+        const verification = verifyCheckoutSession(
+          {
+            metadataInvoiceId: session.metadata?.invoice_id,
+            metadataTenantId: session.metadata?.tenant_id,
+            metadataExpectedAmount: session.metadata?.expected_amount,
+            amountTotal: session.amount_total,
+            currency: session.currency,
+            paymentIntentId: typeof pi === 'string' ? pi : (pi?.id ?? null),
+          },
+          tenant.id,
+          invoice ? { id: invoice.id, tenant_id: invoice.tenant_id } : undefined,
+        )
+
+        if (!verification.ok) {
+          // Verification failures are terminal — a forged or mismatched
+          // session never becomes valid on retry.
+          logger.error('[webhook] checkout verification failed', {
+            eventId: event.id,
+            sessionId: session.id,
+            reason: verification.reason,
           })
-          break
+          await markProcessed('done', `verification: ${verification.reason}`)
+          return NextResponse.json({ received: true })
         }
 
-        // Verify amount/currency against the invoice's own deposit_amount
-        // rather than trusting the Checkout Session's total blindly (Phase 1:
-        // "Verify tenant, connected account, invoice, amount, currency").
-        const invoice = await getInvoiceById(invoiceId, tenant.id)
-        if (!invoice) {
-          logger.warn('[webhook] checkout.session.completed: invoice not found for tenant', { invoiceId, tenantId: tenant.id })
-          break
-        }
-        if (session.currency !== 'usd') {
-          logger.error('[webhook] unexpected currency on checkout session', { sessionId: session.id, currency: session.currency })
-          break
-        }
-        if (session.amount_total !== invoice.deposit_amount) {
-          logger.error('[webhook] amount mismatch between checkout session and invoice deposit_amount', {
-            sessionId: session.id, sessionAmount: session.amount_total, expectedAmount: invoice.deposit_amount,
-          })
-          break
-        }
+        const result = await applyPayment({
+          invoiceId: verification.invoiceId,
+          tenantId: tenant.id,
+          amount: verification.amount,
+          provider: 'stripe',
+          providerAccountId: stripeAccountId,
+          providerPaymentIntentId: verification.paymentIntentId,
+          providerCheckoutSessionId: session.id,
+          eventSource: 'webhook',
+          metadata: { payment_type: session.metadata?.payment_type ?? null, stripe_event_id: event.id },
+        })
 
-        const result = await markDepositPaid(invoiceId, paymentIntentId, tenant.id)
         if (!result.ok) {
-          if ('invalidTransition' in result) {
-            logger.warn('[webhook] markDepositPaid invalid transition', { from: result.from, invoiceId })
-          } else {
-            logger.warn('[webhook] markDepositPaid invoice not found', { invoiceId, tenantId: tenant.id })
+          if (result.reason === 'not_payable') {
+            // Money genuinely moved on Stripe but the invoice can't take it
+            // (e.g. voided since). Terminal here; reconciliation surfaces it.
+            logger.error('[webhook] payment arrived for non-payable invoice', {
+              invoiceId: verification.invoiceId,
+              detail: result.detail,
+            })
+            await markProcessed('done', `not_payable: ${result.detail}`)
+            return NextResponse.json({ received: true })
+          }
+          // Transient (ledger/DB error) — let Stripe retry.
+          throw new Error(`applyPayment failed: ${result.reason} ${result.detail ?? ''}`)
+        }
+        break
+      }
+
+      case 'charge.refunded': {
+        const charge = event.data.object
+        const piId = typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id
+        if (!piId) {
+          await markProcessed('done', 'charge.refunded without payment_intent')
+          return NextResponse.json({ received: true })
+        }
+
+        // Find the ledger payment row this refund reverses.
+        const { data: paymentRow } = await db
+          .from('payments')
+          .select('*')
+          .eq('tenant_id', tenant.id)
+          .eq('provider_payment_intent_id', piId)
+          .eq('kind', 'payment')
+          .maybeSingle()
+
+        if (!paymentRow) {
+          // Out-of-order delivery (refund before its payment event) — mark
+          // transient and 500 so Stripe redelivers once the payment landed.
+          throw new Error(`refund arrived before ledger payment for intent ${piId}`)
+        }
+
+        const payment = paymentRow as unknown as { id: string; invoice_id: string }
+        // A charge can carry multiple partial refunds — record each once.
+        for (const refund of charge.refunds?.data ?? []) {
+          const result = await applyRefund({
+            invoiceId: payment.invoice_id,
+            tenantId: tenant.id,
+            refundedPaymentId: payment.id,
+            amount: refund.amount,
+            provider: 'stripe',
+            providerRefundId: refund.id,
+            providerAccountId: stripeAccountId,
+            reason: refund.reason ?? 'stripe refund',
+            eventSource: 'webhook',
+          })
+          if (!result.ok && result.reason === 'ledger_error') {
+            throw new Error(`applyRefund failed: ${result.detail}`)
           }
         }
         break
@@ -134,13 +204,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           patch.stripe_onboarding_completed_at = new Date().toISOString()
         }
 
-        const { error } = await db
-          .from('tenants')
-          .update(patch)
-          .eq('id', tenant.id)
-
+        const { error } = await db.from('tenants').update(patch).eq('id', tenant.id)
         if (error) {
-          logger.error('[webhook] account.updated tenant patch failed', { tenantId: tenant.id, error: error.message })
+          throw new Error(`account.updated tenant patch failed: ${error.message}`)
         }
         break
       }
@@ -150,11 +216,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     await markProcessed('done')
+    return NextResponse.json({ received: true })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    logger.error('[webhook] unhandled processing error', { eventId: event.id, error: msg })
+    logger.error('[webhook] transient processing error — Stripe will retry', { eventId: event.id, error: msg })
     await markProcessed('error', msg)
+    // Non-2xx → Stripe redelivers on its retry schedule; rows stuck in
+    // 'error' are surfaced by the reconciliation job (dead-letter).
+    return NextResponse.json({ error: 'Processing failed' }, { status: 500 })
   }
-
-  return NextResponse.json({ received: true })
 }

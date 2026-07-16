@@ -156,3 +156,38 @@ describe("work-order project + change-order permission matrix (Phase 5)", () => 
     }
   });
 });
+
+describe("invoice + payment permission matrix (Phase 6)", () => {
+  it("technicians have no billing surface", () => {
+    const p = rolePermissions[UserRole.TECHNICIAN];
+    expect(p.canViewInvoices).toBe(false);
+    expect(p.canManageInvoices).toBe(false);
+    expect(p.canRefundPayments).toBe(false);
+  });
+
+  it("office staff run billing day-to-day but cannot refund", () => {
+    const p = rolePermissions[UserRole.OFFICE_STAFF];
+    expect(p.canViewInvoices).toBe(true);
+    expect(p.canManageInvoices).toBe(true);
+    expect(p.canRefundPayments).toBe(false);
+    // Stripe Connect onboarding rides canManageSettings — staff cannot onboard.
+    expect(p.canManageSettings).toBe(false);
+  });
+
+  it("read-only owner views invoices but manages nothing", () => {
+    const p = rolePermissions[UserRole.READ_ONLY_OWNER];
+    expect(p.canViewInvoices).toBe(true);
+    expect(p.canManageInvoices).toBe(false);
+    expect(p.canRefundPayments).toBe(false);
+  });
+
+  it("tenant admin and platform owner have the full billing surface including refunds", () => {
+    for (const role of [UserRole.TENANT_ADMIN, UserRole.PLATFORM_OWNER]) {
+      const p = rolePermissions[role];
+      expect(p.canViewInvoices).toBe(true);
+      expect(p.canManageInvoices).toBe(true);
+      expect(p.canRefundPayments).toBe(true);
+      expect(p.canManageSettings).toBe(true);
+    }
+  });
+});

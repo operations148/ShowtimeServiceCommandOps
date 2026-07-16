@@ -86,7 +86,22 @@ export type AuditActionType =
   | "change_order.override"
   | "change_order.contract_value_applied"
   | "change_order.schedule_impact_applied"
-  | "change_order.token_revoked";
+  | "change_order.token_revoked"
+  // Invoices & payments (Phase 6)
+  | "invoice.created"
+  | "invoice.updated"
+  | "invoice.sent"
+  | "invoice.send_failed"
+  | "invoice.voided"
+  | "invoice.transitioned"
+  | "invoice.token_revoked"
+  | "payment.recorded"
+  | "payment.refunded"
+  | "payment.credited"
+  | "stripe.onboarding_started"
+  | "stripe.account_updated"
+  | "reconciliation.run"
+  | "reconciliation.finding_resolved";
 
 export interface AuditEntry {
   tenantId: string;
