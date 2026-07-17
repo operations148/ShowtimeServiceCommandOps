@@ -107,7 +107,11 @@ export type AuditActionType =
   | "portal_user.updated"
   | "portal_user.access_revoked"
   | "portal_user.reinvited"
-  | "portal_user.sessions_revoked";
+  | "portal_user.sessions_revoked"
+  // Job costing (Phase 9). Rate changes are compensation-adjacent and
+  // forward-only (they never rewrite historical entries), so they're audited.
+  | "costing.rates_updated"
+  | "costing.technician_rate_updated";
 
 export interface AuditEntry {
   tenantId: string;

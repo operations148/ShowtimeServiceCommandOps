@@ -91,6 +91,30 @@ export interface RolePermissions {
   // facing surface, so treated like team/settings management (not office
   // staff by default — it grants a customer login to tenant data).
   canManagePortalUsers: boolean;
+
+  // Job costing (Phase 9). THREE deliberately separate rails (ADR-0016 §3):
+  //
+  //   canLogJobCosts     — may RECORD time/mileage/expenses. Technicians: YES,
+  //                        it's their job. Read-only owners: NO (read-only).
+  //   canViewJobCosting  — may SEE rates, cost_cents and margin. Follows the
+  //                        SAME line as canViewItemCosts/canViewFinancialReports:
+  //                        owners only. Office staff run billing but do not see
+  //                        cost — and job costing exposes LABOR rates, which are
+  //                        compensation-adjacent, so this is the stricter of the
+  //                        two rails, not the looser one.
+  //   canManageJobCosting — may edit/delete ANY entry (not just their own) and
+  //                        set technician/tenant rates. Owner-level: setting a
+  //                        labor rate is editing compensation data.
+  //
+  // NOT folded into canViewItemCosts on purpose: pricebook cost is "what a part
+  // costs us"; job costing is "what a person costs us + what we made". A tenant
+  // could reasonably grant one without the other.
+  //
+  // Cost fields are stripped SERVER-SIDE by src/lib/costing/serialize.ts for
+  // roles without canViewJobCosting — the UI is not the control.
+  canLogJobCosts: boolean;
+  canViewJobCosting: boolean;
+  canManageJobCosting: boolean;
 }
 
 export const rolePermissions: Record<UserRole, RolePermissions> = {
@@ -136,6 +160,9 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canApplyScheduleImpact: true,
     canViewInvoices: true,
     canManagePortalUsers: true,
+    canLogJobCosts: true,
+    canViewJobCosting: true,
+    canManageJobCosting: true,
   },
   [UserRole.TENANT_ADMIN]: {
     canViewAllWorkOrders: true,
@@ -179,6 +206,9 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     canApplyScheduleImpact: true,
     canViewInvoices: true,
     canManagePortalUsers: true,
+    canLogJobCosts: true,
+    canViewJobCosting: true,
+    canManageJobCosting: true,
   },
   [UserRole.OFFICE_STAFF]: {
     canViewAllWorkOrders: true,
@@ -228,6 +258,12 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     // Office staff run billing day-to-day (canManageInvoices: true) — view rides along.
     canViewInvoices: true,
     canManagePortalUsers: false,
+    // Office staff do the day-to-day costing data entry (receipts, expenses)
+    // but never see cost or margin — the same line already drawn by
+    // canViewItemCosts: false / canViewFinancialReports: false above.
+    canLogJobCosts: true,
+    canViewJobCosting: false,
+    canManageJobCosting: false,
   },
   [UserRole.TECHNICIAN]: {
     canViewAllWorkOrders: false,
@@ -279,6 +315,12 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     // No billing surface for technicians.
     canViewInvoices: false,
     canManagePortalUsers: false,
+    // Technicians log their own time/mileage/expenses — that IS their job — but
+    // are structurally cost-blind: they never see their burdened rate, the job's
+    // cost, or its margin (ADR-0016 §3).
+    canLogJobCosts: true,
+    canViewJobCosting: false,
+    canManageJobCosting: false,
   },
   [UserRole.READ_ONLY_OWNER]: {
     canViewAllWorkOrders: true,
@@ -327,5 +369,10 @@ export const rolePermissions: Record<UserRole, RolePermissions> = {
     // Read-only owner sees invoices/payments but cannot manage them.
     canViewInvoices: true,
     canManagePortalUsers: false,
+    // Sees the money (consistent with canViewItemCosts / canViewFinancialReports
+    // above) but writes nothing — read-only means read-only.
+    canLogJobCosts: false,
+    canViewJobCosting: true,
+    canManageJobCosting: false,
   },
 };
