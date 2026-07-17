@@ -15,6 +15,8 @@ import {
   X,
   ImageIcon,
   MessageSquare,
+  CloudOff,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -24,6 +26,10 @@ import {
 } from "@/types/work-order";
 import { VisitStatus, type ChecklistItem } from "@/types/visit";
 import type { PropertyWithRelations } from "@/types/property";
+import { useVisitSync } from "@/lib/offline/use-visit-sync";
+import { saveDraft, loadDraft, clearDraft } from "@/lib/offline/drafts";
+import { generatePhotoId } from "@/lib/offline/photo-id";
+import { OfflineBanner } from "@/components/tech/OfflineBanner";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -38,7 +44,7 @@ interface Props {
 
 // ─── Photo state ──────────────────────────────────────────────────────────────
 
-type PhotoStatus = "loading" | "uploading" | "done" | "error";
+type PhotoStatus = "loading" | "uploading" | "done" | "error" | "queued";
 
 interface PhotoItem {
   localId: string;
@@ -46,6 +52,8 @@ interface PhotoItem {
   path: string;         // storage path; empty while uploading
   status: PhotoStatus;
   errorMsg?: string;
+  clientPhotoId?: string; // stable id for idempotent (offline-retry) upload
+  file?: File;            // kept in memory so a failed offline upload can retry
 }
 
 const MAX_PHOTOS = 10;
@@ -57,6 +65,8 @@ type Phase =
   | "completion_modal"   // Ready to complete — show required message textarea
   | "estimate_prompt"    // Estimate tapped — show notes sheet
   | "submitting"         // API call in flight
+  | "queued_complete"    // Offline — completion queued, will sync on reconnect
+  | "queued_estimate"    // Offline — estimate flag queued, will sync on reconnect
   | "done_complete"      // Visit saved as COMPLETED
   | "done_estimate";     // Visit saved with estimate_flagged = true
 
@@ -293,6 +303,50 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
   const [photos, setPhotos]                   = useState<PhotoItem[]>([]);
   const fileInputRef                          = useRef<HTMLInputElement>(null);
 
+  // ── Offline resilience (Phase 8, ADR-0015) ───────────────────────────────
+  // A queued submit (offline) remembers its done-summary + kind so that when
+  // the outbox flushes on reconnect we can advance to the right done screen.
+  const pendingRef = useRef<{ kind: "complete" | "estimate"; summary: DoneSummary } | null>(null);
+
+  const { online, enabled: offlineEnabled, submit, queuedCount, flushing, syncError, recheck } =
+    useVisitSync({
+      visitId,
+      onQueuedSynced: () => {
+        const pending = pendingRef.current;
+        if (!pending) return;
+        pendingRef.current = null;
+        clearDraft(visitId);
+        setDoneSummary(pending.summary);
+        setPhase(pending.kind === "complete" ? "done_complete" : "done_estimate");
+      },
+    });
+
+  // Restore any locally-saved draft (checklist + notes) once on mount, so work
+  // done offline / before a dropped connection isn't lost on reload.
+  //
+  // draftReady is STATE, not a ref, on purpose: the restore below calls
+  // setChecklist/setNotes, which don't apply until the next render. A ref would
+  // let the autosave effect run in this same commit while `checklist` still
+  // holds the initial props — overwriting the very draft we just restored.
+  // Gating on state defers the first autosave to the render that has the
+  // restored values.
+  const [draftReady, setDraftReady] = useState(false);
+  useEffect(() => {
+    if (!offlineEnabled) return;
+    const draft = loadDraft(visitId);
+    if (draft) {
+      if (Array.isArray(draft.checklist) && draft.checklist.length > 0) setChecklist(draft.checklist);
+      if (draft.notes) setNotes(draft.notes);
+    }
+    setDraftReady(true);
+  }, [visitId, offlineEnabled]);
+
+  // Persist the draft whenever checklist/notes change (best-effort, local only).
+  useEffect(() => {
+    if (!offlineEnabled || !draftReady) return;
+    saveDraft(visitId, checklist, notes);
+  }, [visitId, checklist, notes, offlineEnabled, draftReady]);
+
   // ── Load existing photos on mount ────────────────────────────────────────
 
   const loadExistingPhotos = useCallback(async () => {
@@ -330,6 +384,34 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
 
   // ── Photo upload ──────────────────────────────────────────────────────────
 
+  // Upload a single captured photo. Sends a stable client_photo_id so a retried
+  // offline upload is deduped server-side (ADR-0015 §3). On failure while
+  // offline the photo is marked "queued" and re-attempted on reconnect (see the
+  // effect below); the File is kept in memory so the retry has the bytes.
+  const uploadPhoto = useCallback(async (localId: string, file: File, clientPhotoId: string) => {
+    setPhotos((prev) => prev.map((p) => (p.localId === localId ? { ...p, status: "uploading" } : p)));
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("client_photo_id", clientPhotoId);
+
+      const res = await fetch(`/api/visits/${visitId}/photos`, { method: "POST", body: formData });
+      const json = (await res.json()) as { data?: { path: string; signedUrl: string }; error?: string };
+      if (!res.ok || !json.data) throw new Error(json.error ?? `Upload failed (${res.status})`);
+
+      setPhotos((prev) => prev.map((p) => (p.localId === localId ? { ...p, path: json.data!.path, status: "done", file: undefined } : p)));
+    } catch (err) {
+      const offline = typeof navigator !== "undefined" && !navigator.onLine;
+      setPhotos((prev) =>
+        prev.map((p) =>
+          p.localId === localId
+            ? { ...p, status: offlineEnabled && offline ? "queued" : "error", errorMsg: err instanceof Error ? err.message : "Upload failed" }
+            : p
+        )
+      );
+    }
+  }, [visitId, offlineEnabled]);
+
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     // Reset input so the same file can be re-selected after an error
@@ -339,45 +421,28 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
     if (photos.length >= MAX_PHOTOS) return;
 
     const localId = `new-${Date.now()}-${Math.random()}`;
+    const clientPhotoId = generatePhotoId();
     const objectUrl = URL.createObjectURL(file);
 
     setPhotos((prev) => [
       ...prev,
-      { localId, displayUrl: objectUrl, path: "", status: "uploading" },
+      { localId, displayUrl: objectUrl, path: "", status: "uploading", clientPhotoId, file },
     ]);
 
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const res = await fetch(`/api/visits/${visitId}/photos`, {
-        method: "POST",
-        body: formData,
-      });
-      const json = (await res.json()) as { data?: { path: string; signedUrl: string }; error?: string };
-
-      if (!res.ok || !json.data) {
-        throw new Error(json.error ?? `Upload failed (${res.status})`);
-      }
-
-      setPhotos((prev) =>
-        prev.map((p) =>
-          p.localId === localId
-            ? { ...p, path: json.data!.path, status: "done" }
-            : p
-        )
-      );
-    } catch (err) {
-      URL.revokeObjectURL(objectUrl);
-      setPhotos((prev) =>
-        prev.map((p) =>
-          p.localId === localId
-            ? { ...p, status: "error", errorMsg: err instanceof Error ? err.message : "Upload failed" }
-            : p
-        )
-      );
-    }
+    await uploadPhoto(localId, file, clientPhotoId);
   }
+
+  // Retry any photos that failed to upload while offline, once connectivity
+  // returns. The client_photo_id makes each retry idempotent, so a photo that
+  // actually landed before the failure won't duplicate.
+  useEffect(() => {
+    if (!offlineEnabled || !online) return;
+    const pending = photos.filter((p) => p.status === "queued" && p.file && p.clientPhotoId);
+    for (const p of pending) {
+      void uploadPhoto(p.localId, p.file!, p.clientPhotoId!);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online, offlineEnabled]);
 
   async function handleRemovePhoto(photo: PhotoItem) {
     if (photo.status === "uploading") return; // can't remove mid-upload
@@ -406,7 +471,7 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
   const uncheckedCount = totalCount - checkedCount;
   const progressPct   = totalCount > 0 ? Math.round((checkedCount / totalCount) * 100) : 0;
   const allChecked    = uncheckedCount === 0;
-  const isLocked      = phase === "submitting" || phase === "done_complete" || phase === "done_estimate";
+  const isLocked      = phase === "submitting" || phase === "queued_complete" || phase === "queued_estimate" || phase === "done_complete" || phase === "done_estimate";
 
   const address = [
     property?.address_line1,
@@ -429,25 +494,18 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
 
   // ── API call ────────────────────────────────────────────────────────────────
 
-  async function patchVisit(payload: object): Promise<boolean> {
+  // Routes the visit save through the offline sync layer: sends it now when
+  // online, or queues it for auto-flush on reconnect when offline (ADR-0015).
+  // Returns the outcome so the caller can pick the right next screen.
+  async function patchVisit(payload: Record<string, unknown>): Promise<"done" | "queued" | "error"> {
     setApiError(null);
     setPhase("submitting");
-    try {
-      const res = await fetch(`/api/visits/${visitId}`, {
-        method:  "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        throw new Error((json as { error?: string }).error ?? `HTTP ${res.status}`);
-      }
-      return true;
-    } catch (err) {
-      setApiError(err instanceof Error ? err.message : "Failed to save. Try again.");
+    const { outcome, error } = await submit(payload);
+    if (outcome === "error") {
+      setApiError(error ?? "Failed to save. Try again.");
       setPhase("idle");
-      return false;
     }
+    return outcome;
   }
 
   // ── Actions ─────────────────────────────────────────────────────────────────
@@ -464,7 +522,14 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
     const msg = completionMessage.trim();
     if (msg.length < 10) return; // enforce minimum in modal
     const now = new Date().toISOString();
-    const ok = await patchVisit({
+    const summary: DoneSummary = {
+      checkedCount,
+      totalCount,
+      hasNotes:          notes.trim().length > 0,
+      completedAt:       now,
+      completionMessage: msg,
+    };
+    const outcome = await patchVisit({
       status:             VisitStatus.COMPLETED,
       checklist,
       technician_notes:   notes || undefined,
@@ -473,22 +538,29 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
       completion_message: msg,
       completed_by_name:  technicianName ?? undefined,
     });
-    if (ok) {
-      setDoneSummary({
-        checkedCount,
-        totalCount,
-        hasNotes:          notes.trim().length > 0,
-        completedAt:       now,
-        completionMessage: msg,
-      });
+    if (outcome === "done") {
+      clearDraft(visitId);
+      setDoneSummary(summary);
       setPhase("done_complete");
+    } else if (outcome === "queued") {
+      // Offline: remember the summary so the flush-on-reconnect handler can show
+      // the done screen once the server confirms.
+      pendingRef.current = { kind: "complete", summary };
+      setPhase("queued_complete");
     }
   }
 
   async function submitEstimate() {
     const now = new Date().toISOString();
     const combinedNotes = [notes, estimateNotes].filter(Boolean).join("\n\n---\n\nEstimate notes:\n");
-    const ok = await patchVisit({
+    const summary: DoneSummary = {
+      checkedCount,
+      totalCount,
+      hasNotes:          combinedNotes.trim().length > 0,
+      completedAt:       now,
+      completionMessage: "",
+    };
+    const outcome = await patchVisit({
       status:              VisitStatus.IN_PROGRESS,
       checklist,
       technician_notes:    combinedNotes || undefined,
@@ -496,20 +568,49 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
       estimate_flag_notes: estimateNotes || undefined,
       completed_at:        now,
     });
-    if (ok) {
-      setDoneSummary({
-        checkedCount,
-        totalCount,
-        hasNotes:          combinedNotes.trim().length > 0,
-        completedAt:       now,
-        completionMessage: "",
-      });
+    if (outcome === "done") {
+      clearDraft(visitId);
+      setDoneSummary(summary);
       setPhase("done_estimate");
+    } else if (outcome === "queued") {
+      pendingRef.current = { kind: "estimate", summary };
+      setPhase("queued_estimate");
     }
   }
 
   // ── Render done screens ─────────────────────────────────────────────────────
 
+  if (phase === "queued_complete" || phase === "queued_estimate") {
+    return (
+      <div className="flex min-h-[70vh] flex-col items-center justify-center px-6 text-center">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-amber-100">
+          <CloudOff className="h-8 w-8 text-amber-600" />
+        </div>
+        <h1 className="mt-5 font-display text-xl font-bold text-slate-900">Saved on your device</h1>
+        <p className="mt-2 max-w-sm text-sm leading-relaxed text-slate-500">
+          You&apos;re offline, so this {phase === "queued_complete" ? "completed job" : "estimate flag"} is saved
+          on your phone and will finish submitting automatically the moment you get signal. It&apos;s safe to
+          lock your phone or drive to your next stop.
+        </p>
+        <div className="mt-5 flex items-center gap-2 rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600">
+          <span className={cn("h-2 w-2 rounded-full", online ? "bg-emerald-500" : "bg-amber-500")} />
+          {online ? "Reconnected — syncing…" : "Waiting for signal"}
+        </div>
+        <button
+          type="button"
+          onClick={recheck}
+          className="mt-6 inline-flex items-center gap-2 rounded-xl border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 active:bg-slate-50"
+        >
+          <RefreshCw className="h-4 w-4" /> Check connection
+        </button>
+        {syncError && (
+          <p className="mt-4 max-w-sm text-sm text-red-600">
+            Couldn&apos;t submit: {syncError}. Reopen the job to fix and resubmit.
+          </p>
+        )}
+      </div>
+    );
+  }
   if (phase === "done_complete" && doneSummary) {
     return <CompletionScreen wo={wo} summary={doneSummary} />;
   }
@@ -521,6 +622,11 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
 
   return (
     <div className="flex flex-col">
+
+      {/* ── Connectivity banner (Phase 8) ────────────────────────────────────── */}
+      {offlineEnabled && (
+        <OfflineBanner online={online} queuedCount={queuedCount} flushing={flushing} onRetry={recheck} />
+      )}
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="bg-white px-4 pb-5 pt-4 shadow-sm">
@@ -722,12 +828,19 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
                         </p>
                       </div>
                     ) : (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={photo.displayUrl}
-                        alt="Job photo"
-                        className="h-full w-full rounded-xl object-cover"
-                      />
+                      <>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={photo.displayUrl}
+                          alt="Job photo"
+                          className="h-full w-full rounded-xl object-cover"
+                        />
+                        {photo.status === "queued" && (
+                          <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 rounded-b-xl bg-amber-500/90 py-0.5 text-[10px] font-semibold text-white">
+                            <CloudOff className="h-3 w-3" /> Will upload
+                          </div>
+                        )}
+                      </>
                     )}
 
                     {/* Remove button */}
@@ -747,7 +860,7 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
             )}
 
             {/* Add photo button */}
-            {photos.filter((p) => p.status === "done" || p.status === "uploading").length < MAX_PHOTOS && (
+            {photos.filter((p) => p.status === "done" || p.status === "uploading" || p.status === "queued").length < MAX_PHOTOS && (
               <button
                 type="button"
                 disabled={isLocked}
@@ -766,7 +879,7 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
               </button>
             )}
 
-            {photos.filter((p) => p.status === "done" || p.status === "uploading").length >= MAX_PHOTOS && (
+            {photos.filter((p) => p.status === "done" || p.status === "uploading" || p.status === "queued").length >= MAX_PHOTOS && (
               <div className="flex items-center justify-center gap-2 rounded-xl bg-slate-50 py-3">
                 <ImageIcon className="h-4 w-4 text-slate-400" />
                 <p className="text-xs text-slate-400">Maximum {MAX_PHOTOS} photos reached</p>

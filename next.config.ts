@@ -1,11 +1,46 @@
 import type { NextConfig } from "next";
+
+// Phase 8 (ADR-0015): technician offline resilience. runtimeCaching is scoped
+// to TECH routes + TECH GET APIs only — never the dashboard or the customer
+// portal (the portal is explicitly no-store, Phase 7). Reads fall back to the
+// last-synced snapshot offline; writes (POST/PATCH/DELETE) are never cached.
+// Honors the NEXT_PUBLIC_OFFLINE_SYNC_ENABLED kill-switch at build time.
+const offlineEnabled = process.env.NEXT_PUBLIC_OFFLINE_SYNC_ENABLED !== "false";
+
+const techRuntimeCaching = [
+  {
+    // Tech GET APIs (today's jobs, visit reads) — last-synced snapshot offline.
+    urlPattern: ({ url, request, sameOrigin }: { url: URL; request: Request; sameOrigin: boolean }) =>
+      sameOrigin && request.method === "GET" && url.pathname.startsWith("/api/visits"),
+    handler: "NetworkFirst",
+    options: {
+      cacheName: "tech-visits-api",
+      networkTimeoutSeconds: 4,
+      expiration: { maxEntries: 64, maxAgeSeconds: 60 * 60 * 24 },
+      cacheableResponse: { statuses: [0, 200] },
+    },
+  },
+  {
+    // Tech app-shell navigations — the job view loads offline for jobs already
+    // opened while online.
+    urlPattern: ({ url, request, sameOrigin }: { url: URL; request: Request; sameOrigin: boolean }) =>
+      sameOrigin && request.mode === "navigate" && url.pathname.startsWith("/tech"),
+    handler: "NetworkFirst",
+    options: {
+      cacheName: "tech-pages",
+      networkTimeoutSeconds: 4,
+      expiration: { maxEntries: 32, maxAgeSeconds: 60 * 60 * 24 },
+    },
+  },
+];
+
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const withPWA = require("next-pwa")({
   dest: "public",
   register: true,
   skipWaiting: true,
   disable: process.env.NODE_ENV === "development",
-  runtimeCaching: [],
+  runtimeCaching: offlineEnabled ? techRuntimeCaching : [],
 });
 
 // Security headers (security-audit M9 — none were configured at all).
