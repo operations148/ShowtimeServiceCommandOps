@@ -42,3 +42,22 @@ _Maps each Phase 0 finding to the exact control now in place, with file referenc
 - MFA (documented production blocker, per phase-prompt allowance).
 - `invoices`/`user_invitations`/`invoice_line_items` untracked-migration reconciliation (Phase 2).
 - Full permission-model retrofit across all 35 routes (ADR-0003 explains why).
+
+## Addendum — RLS backfill hardening (2026-07-17, post-Phase 9)
+
+Supabase's database advisor flagged 5 tables with RLS **disabled**, reachable by the
+anon/authenticated PostgREST roles. Verified live before fixing: **the public anon key
+could read `rate_limits` rows** (login-attempt keys carrying user emails) and could
+equally have deleted them, resetting login brute-force protection. This was the M1/H1
+debt combining: tables added across Phases 1–6 that missed the RLS loop newer
+migrations apply. The app itself was never affected (all queries go through the
+service-role client, which has BYPASSRLS) — the exposure was the direct PostgREST path
+around the app.
+
+| Table | Fix (migration `20260717000002`) |
+|---|---|
+| `invoice_line_items`, `recurring_schedules`, `work_order_status_history` | RLS enabled + the standard tenant-scoped select/write policies (same pattern as `20260714000001`) |
+| `rate_limits`, `webhook_events` | Internal-only (no `tenant_id`, no legitimate non-service reader): RLS enabled with **no policies** (default-deny) + `REVOKE ALL FROM anon, authenticated` |
+
+Verified after applying: anon-key PostgREST reads of all 5 tables are denied; login
+(rate-limiter write path) and app pages unaffected.

@@ -7,6 +7,36 @@ import { recordAuditEvent } from "@/lib/security/audit";
 type RouteContext = { params: Promise<{ id: string }> };
 
 // ---------------------------------------------------------------------------
+// GET /api/technicians/[id]/rate
+//
+// Current burdened hourly cost, for the edit panel's rate field. Same strict
+// permission as writing it — this is compensation-adjacent data, so even
+// reading it is owner-only (canManageJobCosting), not general technician-edit.
+// ---------------------------------------------------------------------------
+export async function GET(_request: NextRequest, { params }: RouteContext) {
+  const auth = await requirePermission("canManageJobCosting");
+  if (!auth.ok) return auth.response;
+  const tenantId = getTenantId(auth.session);
+  const { id } = await params;
+
+  const { data, error } = await db
+    .from("technicians")
+    .select("id, hourly_cost_cents")
+    .eq("id", id)
+    .eq("tenant_id", tenantId)
+    .maybeSingle();
+  if (error) {
+    console.error("[api] GET technician rate:", error.message);
+    return NextResponse.json({ error: "Failed to load rate" }, { status: 500 });
+  }
+  if (!data) return NextResponse.json({ error: "Technician not found" }, { status: 404 });
+
+  return NextResponse.json({
+    data: { hourly_cost_cents: (data as { hourly_cost_cents?: number }).hourly_cost_cents ?? 0 },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // PATCH /api/technicians/[id]/rate
 //
 // A technician's BURDENED hourly cost. Deliberately its own route rather than a

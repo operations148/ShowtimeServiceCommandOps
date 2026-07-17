@@ -6,11 +6,13 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
-  User,
   Briefcase,
   AlertTriangle,
 } from "lucide-react";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
+import { rolePermissions } from "@/config/roles";
+import type { UserRole } from "@/types/technician";
 
 interface Technician {
   id: string;
@@ -50,11 +52,21 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export function EditTechnicianPanel({ tech, onClose, onUpdated }: Props) {
+  const { data: session } = useSession();
+  const role = session?.user?.role as UserRole | undefined;
+  // Labor cost is compensation-adjacent (Phase 9, ADR-0016): only roles with
+  // canManageJobCosting see or set it. The server enforces the same rail.
+  const canSetRate = role ? rolePermissions[role].canManageJobCosting : false;
+
   // Form state
   const [name, setName]         = useState(tech.name);
   const [email, setEmail]       = useState(tech.email);
   const [phone, setPhone]       = useState(tech.phone ?? "");
   const [isActive, setIsActive] = useState(tech.is_active);
+
+  // Labor rate (dollars in the UI, integer cents on the wire)
+  const [rateDollars, setRateDollars]       = useState("");
+  const [rateLoadedCents, setRateLoadedCents] = useState<number | null>(null);
   const [newPass, setNewPass]   = useState("");
   const [confirmPass, setConfirmPass] = useState("");
   const [showPassReset, setShowPassReset] = useState(false);
@@ -96,6 +108,21 @@ export function EditTechnicianPanel({ tech, onClose, onUpdated }: Props) {
     }
     load();
   }, [tech.id]);
+
+  // Load the current labor rate (owner-only endpoint; skip entirely otherwise)
+  useEffect(() => {
+    if (!canSetRate) return;
+    let active = true;
+    fetch(`/api/technicians/${tech.id}/rate`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { data?: { hourly_cost_cents: number } } | null) => {
+        if (!active || !j?.data) return;
+        setRateLoadedCents(j.data.hourly_cost_cents);
+        setRateDollars(j.data.hourly_cost_cents > 0 ? (j.data.hourly_cost_cents / 100).toFixed(2) : "");
+      })
+      .catch(() => { /* field simply stays empty */ });
+    return () => { active = false; };
+  }, [tech.id, canSetRate]);
 
   // Close on Escape
   useEffect(() => {
@@ -143,6 +170,25 @@ export function EditTechnicianPanel({ tech, onClose, onUpdated }: Props) {
         if (json.fieldErrors) setFieldErrors(json.fieldErrors);
         else setSaveError(json.error ?? "Failed to save");
         return;
+      }
+
+      // Labor rate rides its own owner-only, audited endpoint — only send it
+      // when the value actually changed.
+      if (canSetRate && rateLoadedCents !== null) {
+        const parsed = rateDollars.trim() === "" ? 0 : Math.round(parseFloat(rateDollars) * 100);
+        if (Number.isFinite(parsed) && parsed >= 0 && parsed !== rateLoadedCents) {
+          const rateRes = await fetch(`/api/technicians/${tech.id}/rate`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ hourly_cost_cents: parsed }),
+          });
+          if (!rateRes.ok) {
+            const rateJson = await rateRes.json().catch(() => ({}));
+            setSaveError((rateJson as { error?: string }).error ?? "Profile saved, but the labor rate failed to update");
+            return;
+          }
+          setRateLoadedCents(parsed);
+        }
       }
 
       onUpdated(json.data as Technician);
@@ -280,6 +326,30 @@ export function EditTechnicianPanel({ tech, onClose, onUpdated }: Props) {
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
             />
           </div>
+
+          {/* Labor cost (Phase 9) — owner-only; technicians never see this rail */}
+          {canSetRate && (
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                Labor Cost per Hour ($)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                inputMode="decimal"
+                value={rateDollars}
+                onChange={(e) => setRateDollars(e.target.value)}
+                placeholder={rateLoadedCents === null ? "Loading…" : "e.g. 45.00"}
+                disabled={rateLoadedCents === null}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100 disabled:bg-slate-50"
+              />
+              <p className="mt-1 text-xs text-slate-400">
+                Burdened internal cost used for job costing — not their pay, never shown to the technician.
+                Applies to new time entries only; past entries keep the rate they were logged at.
+              </p>
+            </div>
+          )}
 
           {/* Status toggle */}
           <div className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3">
