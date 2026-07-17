@@ -2,7 +2,7 @@
 
 import { Droplets } from "lucide-react";
 import { useSession } from "next-auth/react";
-import { adminNavItems } from "@/config/navigation";
+import { adminNavItems, type NavItem } from "@/config/navigation";
 import { SidebarNavItem } from "./SidebarNavItem";
 import type { UserRole } from "@/types/technician";
 
@@ -10,12 +10,24 @@ interface SidebarProps {
   className?: string;
 }
 
+// Feature-flagged nav items (e.g. Platform Admin) only show when their
+// NEXT_PUBLIC_ flag is "true". These are inlined at build time, so the lookup
+// must be against the literal env name, not a dynamic key.
+const FEATURE_FLAG_VALUES: Record<string, boolean> = {
+  NEXT_PUBLIC_PLATFORM_ADMIN_ENABLED: process.env.NEXT_PUBLIC_PLATFORM_ADMIN_ENABLED === "true",
+};
+
+function isFeatureItemVisible(item: NavItem): boolean {
+  if (!item.featureFlagEnv) return true;
+  return FEATURE_FLAG_VALUES[item.featureFlagEnv] ?? false;
+}
+
 export function Sidebar({ className }: SidebarProps) {
   const { data: session } = useSession();
   const userRole = session?.user?.role as UserRole | undefined;
 
   const visibleItems = userRole
-    ? adminNavItems.filter((item) => item.roles.includes(userRole))
+    ? adminNavItems.filter((item) => item.roles.includes(userRole) && isFeatureItemVisible(item))
     : [];
 
   const mainNavItems = visibleItems.filter((item) => !item.pinBottom);
