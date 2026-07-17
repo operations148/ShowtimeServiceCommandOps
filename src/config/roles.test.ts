@@ -204,3 +204,52 @@ describe("customer-portal admin permission matrix (Phase 7)", () => {
     expect(rolePermissions[UserRole.READ_ONLY_OWNER].canManagePortalUsers).toBe(false);
   });
 });
+
+describe("job-costing permission matrix (Phase 9)", () => {
+  // The defining rule of ADR-0016 §3: a technician records costs but is blind
+  // to them. If this test ever goes green with canViewJobCosting: true for a
+  // technician, the field app is leaking labor rates and job margin.
+  it("technicians CAN log job costs", () => {
+    expect(rolePermissions[UserRole.TECHNICIAN].canLogJobCosts).toBe(true);
+  });
+
+  it("technicians can NEVER view costs or margin", () => {
+    expect(rolePermissions[UserRole.TECHNICIAN].canViewJobCosting).toBe(false);
+    expect(rolePermissions[UserRole.TECHNICIAN].canManageJobCosting).toBe(false);
+  });
+
+  it("cost visibility follows the same owners-only line as pricebook costs", () => {
+    for (const role of [UserRole.PLATFORM_OWNER, UserRole.TENANT_ADMIN, UserRole.READ_ONLY_OWNER]) {
+      expect(rolePermissions[role].canViewJobCosting).toBe(true);
+      expect(rolePermissions[role].canViewItemCosts).toBe(true);
+    }
+    // Office staff run billing but see neither pricebook cost nor job cost.
+    expect(rolePermissions[UserRole.OFFICE_STAFF].canViewJobCosting).toBe(false);
+    expect(rolePermissions[UserRole.OFFICE_STAFF].canViewItemCosts).toBe(false);
+  });
+
+  it("office staff can do costing data entry without seeing cost", () => {
+    expect(rolePermissions[UserRole.OFFICE_STAFF].canLogJobCosts).toBe(true);
+    expect(rolePermissions[UserRole.OFFICE_STAFF].canViewJobCosting).toBe(false);
+  });
+
+  it("read-only owner sees the money but writes nothing", () => {
+    expect(rolePermissions[UserRole.READ_ONLY_OWNER].canViewJobCosting).toBe(true);
+    expect(rolePermissions[UserRole.READ_ONLY_OWNER].canLogJobCosts).toBe(false);
+    expect(rolePermissions[UserRole.READ_ONLY_OWNER].canManageJobCosting).toBe(false);
+  });
+
+  it("only owners may edit others' entries or set labor rates", () => {
+    expect(rolePermissions[UserRole.PLATFORM_OWNER].canManageJobCosting).toBe(true);
+    expect(rolePermissions[UserRole.TENANT_ADMIN].canManageJobCosting).toBe(true);
+    expect(rolePermissions[UserRole.OFFICE_STAFF].canManageJobCosting).toBe(false);
+  });
+
+  it("anyone who can view job costing can also view financial reports (no back door)", () => {
+    for (const role of Object.values(UserRole)) {
+      if (rolePermissions[role].canViewJobCosting) {
+        expect(rolePermissions[role].canViewFinancialReports).toBe(true);
+      }
+    }
+  });
+});

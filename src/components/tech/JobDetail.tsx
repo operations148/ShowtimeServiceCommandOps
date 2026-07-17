@@ -30,6 +30,7 @@ import { useVisitSync } from "@/lib/offline/use-visit-sync";
 import { saveDraft, loadDraft, clearDraft } from "@/lib/offline/drafts";
 import { generatePhotoId } from "@/lib/offline/photo-id";
 import { OfflineBanner } from "@/components/tech/OfflineBanner";
+import { LogTimeMileageCard } from "@/components/tech/LogTimeMileageCard";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -790,6 +791,9 @@ export function JobDetail({ wo, property, initialChecklist, visitId, initialPhot
             />
           </Card>
         </div>
+
+        {/* Time & mileage (Phase 9) — quantities only; the tech never sees cost */}
+        <LogTimeMileageCard workOrderId={wo.id} visitId={visitId} disabled={isLocked} />
 
         {/* Photos */}
         <div>

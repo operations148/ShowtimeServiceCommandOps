@@ -52,6 +52,7 @@ import type { UserRole } from "@/types/technician";
 import { ChangeOrdersPanel } from "@/components/dashboard/ChangeOrdersPanel";
 import { WorkOrderTasksPanel } from "@/components/dashboard/WorkOrderTasksPanel";
 import { WorkOrderAttachmentsPanel } from "@/components/dashboard/WorkOrderAttachmentsPanel";
+import { JobCostingPanel } from "@/components/dashboard/JobCostingPanel";
 import { cn } from "@/lib/utils";
 
 function money(cents: number): string {
@@ -1351,6 +1352,9 @@ export function WorkOrderDetail({
 
           {/* Attachments (Phase 5) */}
           <WorkOrderAttachmentsPanel workOrderId={workOrder.id} />
+
+          {/* Job costing (Phase 9) — self-hides for roles without canViewJobCosting */}
+          <JobCostingPanel workOrderId={workOrder.id} />
 
           {/* Property */}
           <SectionCard title="Property">
