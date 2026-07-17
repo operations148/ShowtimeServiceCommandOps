@@ -8,6 +8,7 @@ import {
   deleteJobPhoto,
 } from "@/lib/storage/photos";
 import { validateAndReencodeImage } from "@/lib/security/file-validation";
+import { sanitizePhotoId } from "@/lib/offline/photo-id";
 
 const MAX_PHOTOS = 10;
 const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -90,14 +91,6 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "Visit not found" }, { status: 404 });
   }
 
-  const currentCount = (visit.photo_urls ?? []).length;
-  if (currentCount >= MAX_PHOTOS) {
-    return NextResponse.json(
-      { error: `Maximum ${MAX_PHOTOS} photos allowed per visit` },
-      { status: 422 }
-    );
-  }
-
   let formData: FormData;
   try {
     formData = await request.formData();
@@ -110,6 +103,36 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "Missing file field" }, { status: 422 });
   }
 
+  // Offline-retry idempotency (Phase 8, ADR-0015 §3): the client tags each
+  // captured photo with a stable id. If an upload with this id already landed
+  // on the visit (a retried offline capture), return the existing object
+  // instead of uploading a duplicate — never trust the count/append to be safe
+  // under at-least-once retry. This runs BEFORE the photo-cap check so a retry
+  // of an already-stored photo stays idempotent even when the visit is at cap.
+  const rawPhotoId = formData.get("client_photo_id");
+  const photoId = typeof rawPhotoId === "string" ? sanitizePhotoId(rawPhotoId) : null;
+  if (photoId) {
+    const marker = `-photo-${photoId}.`;
+    const existingPath = (visit.photo_urls ?? []).find((p) => p.includes(marker));
+    if (existingPath) {
+      try {
+        const [signed] = await getSignedPhotos([existingPath]);
+        return NextResponse.json({ data: { path: existingPath, signedUrl: signed?.signedUrl ?? "" }, deduped: true }, { status: 200 });
+      } catch (err) {
+        console.error("[api] POST /api/visits/[id]/photos dedup-sign:", err);
+        return NextResponse.json({ data: { path: existingPath, signedUrl: "" }, deduped: true }, { status: 200 });
+      }
+    }
+  }
+
+  const currentCount = (visit.photo_urls ?? []).length;
+  if (currentCount >= MAX_PHOTOS) {
+    return NextResponse.json(
+      { error: `Maximum ${MAX_PHOTOS} photos allowed per visit` },
+      { status: 422 }
+    );
+  }
+
   // Magic-byte sniff + re-encode (strips EXIF/GPS — a technician's phone
   // photo would otherwise retain embedded location data in the stored file)
   // rather than trusting the client-supplied Content-Type (security-audit M4/M6).
@@ -119,7 +142,9 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: validated.reason }, { status: 422 });
   }
 
-  const filename = `photo-${Date.now()}.${validated.image.ext}`;
+  // Embed the client photo id in the object name so the dedup check above can
+  // recognize a retry; fall back to a timestamp for clients that send no id.
+  const filename = photoId ? `photo-${photoId}.${validated.image.ext}` : `photo-${Date.now()}.${validated.image.ext}`;
 
   let uploaded;
   try {
