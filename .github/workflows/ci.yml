@@ -76,11 +76,19 @@ jobs:
       - name: Lightweight secret-pattern scan
         run: |
           # Not a substitute for a dedicated tool (gitleaks/trufflehog) --
-          # those involve a licensing/cost decision left to Phase 11's
-          # production-readiness pass. This is a fast, free, good-faith check
-          # for the most common obviously-shaped secrets landing in a diff.
-          if git diff --name-only origin/${{ github.base_ref || 'master' }}...HEAD 2>/dev/null | xargs -r grep -nE "(AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|sk_live_[0-9a-zA-Z]{20,})" -- 2>/dev/null; then
-            echo "Potential secret pattern found in diff -- review before merging."
+          # this is a fast, free, good-faith check for obviously-shaped secrets.
+          #
+          # Phase 11 fix: the previous version diffed against origin/master,
+          # which is EMPTY on a push to master (HEAD == origin/master), and
+          # `if <empty xargs, exit 0>` then took the failure branch -- every
+          # master push failed with a false "secret found". Scanning all
+          # tracked files instead is immune to event type / shallow checkouts,
+          # and strictly more protective (catches pre-existing secrets too).
+          MATCHES=$(git ls-files -z \
+            | xargs -0 -r grep -nE "(AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|sk_live_[0-9a-zA-Z]{20,}|sb_secret_[A-Za-z0-9_]{10,}|whsec_[A-Za-z0-9]{20,})" -- 2>/dev/null || true)
+          if [ -n "$MATCHES" ]; then
+            echo "$MATCHES"
+            echo "Potential secret pattern found -- review before merging."
             exit 1
           fi
           echo "No obvious secret patterns found."

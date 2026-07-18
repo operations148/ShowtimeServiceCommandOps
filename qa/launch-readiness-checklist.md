@@ -1,81 +1,81 @@
 # Launch Readiness Checklist
-_Last updated: 2026-05-14 — Phase 16 + Showtime pre-launch sections added_
+_Last updated: 2026-07-18 — Phase 11 full reconciliation. The previous version (2026-05-14) predated the entire Markate expansion (Phases 1–10) and referenced retired infrastructure (dead URL, in-memory retry queue); every line below reflects verified current reality. Evidence and analysis live in `docs/launch-readiness-report.md`._
 
-## Code
-- [x] TypeScript strict — no errors (`tsc --noEmit` exits clean)
-- [x] No hardcoded API keys (all secrets via `process.env`)
-- [x] All env vars in `.env.example` (Supabase keys, NEXTAUTH_*, GHL_*, storage)
-- [x] `.env` not committed to git (`.env.local` in `.gitignore`)
+Legend: `[x]` verified · `[c]` config action (no code) · `[m]` manual/human verification required
 
-## Auth & Security
-- [x] All `/dashboard/*` routes require auth (`withAuth` middleware guards `/dashboard/:path*`)
-- [x] All `/tech/*` routes require auth (`withAuth` middleware guards `/tech/:path*`)
-- [x] Technician role blocked from `/dashboard/*` (middleware redirects → `/tech/today`)
-- [x] `tenant_id` on all API-layer DB calls (`getTenantId()` throws on missing session)
-- [x] GHL webhook signature verified (HMAC-SHA256; in production, missing secret returns 503)
-- [x] No hardcoded credentials in source (bcrypt+DB auth; `DEMO_USERS` removed)
-- [x] Reports page reads `tenant_id` from session (fixed Phase 10 — was hardcoded `"tenant-showtime"`)
-- [ ] All `.env` values confirmed set in Vercel dashboard
-- [ ] NEXTAUTH_SECRET confirmed as a strong random value (not default)
-- [ ] Supabase RLS enabled and tested with two tenants
-- [ ] No secrets in source code (run: `grep -r "sk_" --include="*.ts" src/`)
+## Code quality (verified 2026-07-18)
+- [x] TypeScript strict — `tsc --noEmit` clean
+- [x] Lint — 0 errors
+- [x] Automated tests — 413 passing (39 files: money, state machines, costing, redaction, permissions, offline, financial reporting, tokens, webhooks)
+- [x] Production build — `next build` exit 0
+- [x] CI pipeline on client repo — lint/typecheck/tests/migration-check/build/audit/secret-scan (`.github/workflows/ci.yml`)
+- [x] CI secret-scan step fixed (was false-failing every master push — inverted empty-diff logic; now scans all tracked files)
+- [ ] CI green on client repo after next push (expected — the fix ships with Phase 11; verify in the Actions tab)
 
-## GHL Integration
-- [x] Error handling in place (`ghlFetch` retries, never-throw pattern, webhook always 200)
-- [x] Webhook returns 401 for invalid signature; 503 if secret not configured in production
-- [ ] Webhook endpoint configured in GHL settings (requires GHL dashboard action — see below)
-- [ ] Real GHL credentials from client confirmed and set in Vercel
-- [ ] Pipeline stage names confirmed with client and coded in `GHL_OPPORTUNITY_STATUS_TRIGGERS`
-- [ ] Webhook tested with real GHL payload (not just mock data)
-- [ ] Completion sync tested end-to-end (tech marks complete → GHL opportunity updates)
-- [ ] Estimate handoff tested end-to-end (flag → GHL task created → status reflects back)
-- [ ] GHL webhook signature verification tested with live signing secret
+## Security (verified against production 2026-07-18)
+- [x] Security headers live: CSP, HSTS (preload), X-Frame-Options DENY, X-Content-Type-Options, Referrer-Policy, Permissions-Policy
+- [x] RLS enabled on **every** public table (zero disabled — advisor clean after the `20260717000002` backfill)
+- [x] Anon-key PostgREST access denied on internal tables (verified live: 42501/401; `rate_limits` was leaking before the fix)
+- [x] All 3 cron endpoints fail closed without secret (401) — `CRON_SECRET` confirmed set by behavior
+- [x] GHL webhook rejects unsigned POSTs (401 — signature verification active, secret configured)
+- [x] Login rate limiting live (verified: wrong-password → 401, limiter row written)
+- [x] Sessions revocable (staff `session_version` + portal DB-backed sessions re-validated per request)
+- [x] All tokens hashed at rest (invitations, password reset, public documents, portal magic links/sessions)
+- [x] Tenant isolation at the API layer on every route; technicians scoped to own jobs; portal property-scoped
+- [x] Cost/margin redaction server-side (technicians structurally cost-blind — Phase 9 serializer)
+- [x] Audit log covering auth, permissions, payments, portal admin, rate changes, platform actions
+- [x] No secrets committed (value-pattern scan of all tracked files clean; only `.env.example` tracked)
+- [x] Dependency audit run + analyzed — 9 findings remain, **none in the attacker-reachable auth path** (see report §3: Next 15.5.20 has the middleware-bypass CVE patched; residuals are the 16.x-fixed DoS/cache class + build-time tooling). Upgrades scheduled, not launch-blocking.
+- [ ] MFA — not implemented (documented residual since Phase 1; revisit post-launch)
+
+## Payments (Phase 6 — deployed, dormant)
+- [x] Invoice lifecycle, immutable ledger, Stripe Connect code, webhook verification, reconciliation cron — all deployed
+- [c] `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` set in Vercel (test keys first) — **payments stay off until set**
+- [c] Stripe webhook endpoint created (checkout.session.completed, charge.refunded, account.updated + Connect events)
+- [m] One end-to-end test payment in Stripe test mode (checkout → webhook → ledger → invoice paid)
+- [m] Tenant Stripe Connect onboarding completed by the client
+
+## Customer portal (Phase 7 — live)
+- [x] Portal deployed; no-store cache policy verified live; sessions revocable; property-scoped
+- [c] Customer email delivery is **preview-gated** — approve live sends before inviting real customers
+- [m] Invite one pilot customer; walk the accept/decline/pay flow with them
+
+## Technician PWA & offline (Phase 8 — live)
+- [x] Offline read cache + drafts + outbox deployed (kill-switch on by default)
+- [m] Real-phone pass per `qa/technician-offline-test-plan.md` (airplane-mode job view, offline complete → reconnect sync, photo retry) — **cannot be verified from a terminal**
+- [m] Tap targets / layout on a real iPhone and Android
+
+## Job costing (Phase 9 — live)
+- [x] Time/mileage/expense capture + derived rollup + cost-blind technicians deployed
+- [c] Set tenant mileage + labor-fallback rates, and each technician's hourly cost (Technicians → edit) — **until then every job costs $0 and margin reads 100%**
+
+## Financial reporting & platform admin (Phase 10 — live)
+- [x] Financial report live + owner-gated (verified: authed owner receives a real report; unauthenticated → 401)
+- [x] Platform admin dormant (`NEXT_PUBLIC_PLATFORM_ADMIN_ENABLED` unset → 404) — leave off until a second tenant exists
+
+## GHL integration
+- [x] Webhook signature verification + always-200-to-GHL handling + durable outbox retry (Phase 1; the in-memory queue is long gone)
+- [x] Reporting confirmed running in LIVE mode (not mock data)
+- [c] Confirm `GHL_PRIVATE_INTEGRATION_TOKEN` / location mapping current in Vercel (values unreadable via CLI; webhook behavior implies configured)
+- [m] Webhook configured in GHL Settings → URL `https://serviceops-ghl-workorders-chi.vercel.app/api/ghl/webhooks` + events + secret
+- [m] End-to-end with a real GHL payload: opportunity → work order created
+- [m] Estimate handoff + completion sync verified against the live GHL location
+- [m] Pipeline stage names confirmed with the client against `GHL_JOB_READY_STAGES`
 
 ## Data
-- [x] GHL webhook pipeline wired to Supabase DB (all 3 handlers use real DB queries)
-- [x] Work order creation saves to DB (confirmed working)
-- [x] `estimate_handoffs` table written to when estimate is flagged (fixed Phase 10)
-- [x] GHL task ID written back to `estimate_handoffs` record on successful GHL sync
-- [x] Visits link to work orders (FK in schema; `getOrCreateVisit` persists to DB)
-- [ ] Seed data removed or clearly marked as test data (not real customer records)
-- [ ] Client's real properties imported or ready to add manually
-- [ ] Technician accounts created with real credentials (real names, real email addresses)
-- [ ] Admin account email changed from `@showtime.local` to client's real email
-- [ ] Property records tested end-to-end (UI create → DB → list)
+- [x] Production DB current through migration `20260717000003` (32/32 applied, none pending)
+- [x] Real tenant (Showtime Pool Service) with real properties/technicians — no demo seed rows
+- [m] Client's full property list imported or entered
+- [m] Real technician accounts created (real emails); confirm the admin account email is the client's
 
-## UI / Performance
-- [x] Work Orders table fetches from real DB via API (loading skeleton + error + retry)
-- [x] Properties table fetches from real DB via API (loading skeleton + error + retry)
-- [x] Overview/Reports dashboard reads tenant from session (not hardcoded)
-- [x] Technician today page fetches from DB (server component, filtered by tech + date)
-- [x] Technician job detail fetches from DB (`getOrCreateVisit` persists checklist)
-- [x] New work order appears in list after creation (live refresh via `forwardRef` + retry)
-- [ ] Dashboard overview loads under 2 seconds
-- [ ] Work orders list loads under 2 seconds
-- [ ] Technician mobile view loads under 1.5 seconds
-- [ ] Images lazy-loaded on work order detail
+## Infrastructure
+- [x] Production URL: `https://serviceops-ghl-workorders-chi.vercel.app` (the old `serviceops-ghl-workorders.vercel.app` is a different account's stale deployment — do not use)
+- [x] Crons registered (Vercel Hobby = daily max: generate-visits, drain-ghl-outbox, reconcile-payments)
+- [x] Deploys via `vercel --prod` (do not rely on push-to-deploy)
+- [ ] Consider Vercel Pro if crons need to run more than daily (reconciliation/outbox currently 1×/day)
 
-## Mobile
-- [ ] Tested on real iPhone (Safari)
-- [ ] Tested on real Android (Chrome)
-- [ ] All buttons meet 44px minimum tap target
-- [ ] No horizontal scroll on mobile
-- [ ] Checklist completion works gracefully on slow 4G
-- [ ] Technician view tested on real phone — manual test required
-- [ ] Dashboard tested on tablet — manual test required
-- [ ] No broken layouts — manual browser sweep required
-
-## Pending Manual / External Actions
-- [ ] **NEXTAUTH_URL** — must be `https://serviceops-ghl-workorders.vercel.app` in Vercel env vars
-- [ ] **GHL webhooks** — configure in GHL → Settings → Integrations → Webhooks:
-  - URL: `https://serviceops-ghl-workorders.vercel.app/api/ghl/webhooks`
-  - Events: `OpportunityStatusChange`, `AppointmentBooked`, `ContactCreate`, `ContactUpdate`
-  - Secret: value of `GHL_WEBHOOK_SECRET` from Vercel env
-- [ ] **CRON_SECRET** — set in Vercel for recurring schedule cron (Monday 6 AM UTC auto-registered)
-- [ ] **Persistent retry queue** — replace in-memory queue with Supabase `ghl_sync_queue` table or Upstash QStash before production (schema in `integration-blueprint/ghl-api-error-handling.md`)
-
-## Client Sign-off
-- [ ] Client demo walkthrough completed
-- [ ] Client has reviewed technician mobile flow on real phone
-- [ ] Client has confirmed GHL pipeline stage names match `GHL_OPPORTUNITY_STATUS_TRIGGERS`
-- [ ] Client has confirmed GHL custom field IDs for pool-specific fields (gate codes, service notes)
+## Client sign-off
+- [m] Demo walkthrough completed (dashboard → job → invoice → portal)
+- [m] Client reviewed the technician flow on a real phone
+- [m] Client approved: live Stripe keys, live portal email, GHL stage names
+- [m] Client has the EOD reports for Phases 0–10
