@@ -253,3 +253,12 @@ describe("job-costing permission matrix (Phase 9)", () => {
     }
   });
 });
+
+describe("platform-admin permission matrix (Phase 10)", () => {
+  it("only the platform owner may manage tenants (cross-tenant surface)", () => {
+    expect(rolePermissions[UserRole.PLATFORM_OWNER].canManageTenants).toBe(true);
+    for (const role of [UserRole.TENANT_ADMIN, UserRole.OFFICE_STAFF, UserRole.TECHNICIAN, UserRole.READ_ONLY_OWNER]) {
+      expect(rolePermissions[role].canManageTenants).toBe(false);
+    }
+  });
+});

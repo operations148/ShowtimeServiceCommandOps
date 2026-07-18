@@ -6,6 +6,8 @@ export interface NavItem {
   icon: string;
   roles: UserRole[];
   pinBottom?: boolean;
+  /** When set, the item only shows if this NEXT_PUBLIC_ flag env var is "true". */
+  featureFlagEnv?: string;
 }
 
 export const adminNavItems: NavItem[] = [
@@ -82,6 +84,16 @@ export const adminNavItems: NavItem[] = [
     href: "/dashboard/reports",
     icon: "BarChart2",
     roles: [UserRole.PLATFORM_OWNER, UserRole.TENANT_ADMIN, UserRole.OFFICE_STAFF, UserRole.READ_ONLY_OWNER],
+  },
+  {
+    // Platform admin (Phase 10) — platform_owner only, and only when the
+    // kill-switch is on. Cross-tenant surface.
+    label: "Platform Admin",
+    href: "/dashboard/platform",
+    icon: "ShieldAlert",
+    roles: [UserRole.PLATFORM_OWNER],
+    featureFlagEnv: "NEXT_PUBLIC_PLATFORM_ADMIN_ENABLED",
+    pinBottom: true,
   },
   {
     label: "Settings",

@@ -1,6 +1,9 @@
 'use client'
 
 import { usePathname, useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
+import { rolePermissions } from '@/config/roles'
+import type { UserRole } from '@/types/technician'
 
 const TABS = [
   {
@@ -21,15 +24,29 @@ const TABS = [
     description: 'Source attribution and campaign ROI',
     href: '/dashboard/reports/marketing',
   },
+  {
+    id: 'financial',
+    label: 'Financial',
+    description: 'Revenue, cost, margin, and receivables',
+    href: '/dashboard/reports/financial',
+    // Owner-only (Phase 10): shown only to roles with canViewFinancialReports,
+    // so office staff don't see a tab that only tells them "no".
+    ownerOnly: true,
+  },
 ] as const
 
 export function ReportingTabs() {
   const pathname = usePathname()
   const router = useRouter()
+  const { data: session } = useSession()
+  const role = session?.user?.role as UserRole | undefined
+  const canViewFinancial = role ? rolePermissions[role].canViewFinancialReports : false
+
+  const visibleTabs = TABS.filter((t) => !('ownerOnly' in t && t.ownerOnly) || canViewFinancial)
 
   return (
     <div className="bg-white border border-[#E2E8F0] rounded-xl p-1 flex gap-1 shadow-sm">
-      {TABS.map(tab => {
+      {visibleTabs.map(tab => {
         const active = pathname.includes(tab.id)
         return (
           <button

@@ -111,7 +111,11 @@ export type AuditActionType =
   // Job costing (Phase 9). Rate changes are compensation-adjacent and
   // forward-only (they never rewrite historical entries), so they're audited.
   | "costing.rates_updated"
-  | "costing.technician_rate_updated";
+  | "costing.technician_rate_updated"
+  // Platform admin (Phase 10). Cross-tenant actions — the highest-privilege
+  // surface in the app.
+  | "platform.tenant_activated"
+  | "platform.tenant_suspended";
 
 export interface AuditEntry {
   tenantId: string;
