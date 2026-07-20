@@ -11,17 +11,59 @@
 
 import type { WorkOrderWithRelations } from "@/types/work-order";
 import { updateWorkOrder } from "@/lib/db/queries/work-orders";
+import { getTenantById } from "@/lib/db/queries/tenants";
 import { updateOpportunity } from "./client";
 import { enqueueGhlSync } from "./sync-outbox";
+import { buildCompletionPayload, postCompletionWebhook } from "./completion-webhook";
+
+/**
+ * Phase 12 (ADR-0018): POST the completion payload to the tenant's GHL
+ * Inbound Webhook URL (their review-request workflow trigger). Independent of
+ * the opportunity→won sync: fires even for manually-created work orders with
+ * no GHL opportunity, and a failure in one never blocks the other. Skipped
+ * silently when no URL is configured. Durable via the outbox on failure.
+ */
+async function sendCompletionPayload(workOrder: WorkOrderWithRelations, tag: string): Promise<void> {
+  try {
+    const tenant = await getTenantById(workOrder.tenant_id);
+    const url = (tenant as { ghl_completion_webhook_url?: string | null } | undefined)?.ghl_completion_webhook_url;
+    if (!url) return; // not configured — not an error
+
+    const payload = buildCompletionPayload(workOrder, tenant?.name ?? null);
+    const result = await postCompletionWebhook(url, payload);
+
+    if (result.ok) {
+      console.log(`${tag} completion webhook delivered (${result.status})`);
+      return;
+    }
+
+    console.error(`${tag} completion webhook failed: ${result.error} — enqueueing for retry`);
+    await enqueueGhlSync({
+      type: "completion_webhook",
+      ghl_opportunity_id: workOrder.ghl_opportunity_id ?? "",
+      work_order_id: workOrder.id,
+      tenant_id: workOrder.tenant_id,
+      payload: { url, body: payload as unknown as Record<string, unknown> },
+      lastError: result.error,
+    });
+  } catch (err) {
+    console.error(`${tag} completion webhook unexpected error:`, err);
+  }
+}
 
 export async function syncCompletionToGhl(
   workOrder: WorkOrderWithRelations
 ): Promise<void> {
   const tag = `[ghl/sync-completion wo=${workOrder.id}]`;
 
+  // Payload webhook first — it does NOT require a GHL opportunity link
+  // (manually-created jobs still notify the review workflow; the payload
+  // carries the customer name/address for matching).
+  await sendCompletionPayload(workOrder, tag);
+
   // Work order was created manually in ServiceOps — no GHL link to sync.
   if (!workOrder.ghl_opportunity_id) {
-    console.log(`${tag} No ghl_opportunity_id — outbound sync skipped`);
+    console.log(`${tag} No ghl_opportunity_id — opportunity sync skipped`);
     return;
   }
 

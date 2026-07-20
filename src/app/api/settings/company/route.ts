@@ -18,6 +18,8 @@ export interface CompanyProfile {
   logo_url: string | null;
   ghl_location_id: string | null;
   last_webhook_at: string | null;
+  /** Phase 12: GHL Inbound Webhook trigger URL for the review-request workflow. */
+  ghl_completion_webhook_url: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -30,6 +32,13 @@ const UpdateCompanySchema = z.object({
   business_phone: z.string().max(40).transform(v => v.trim()).optional(),
   business_email: z.string().email("Enter a valid email").transform(v => v.toLowerCase().trim()).optional().or(z.literal("")),
   service_area:   z.string().max(200).transform(v => v.trim()).optional(),
+  // Phase 12 (ADR-0018): must be https (SSRF guard — the sender re-checks too).
+  // Empty string clears it.
+  ghl_completion_webhook_url: z
+    .string().max(500).transform(v => v.trim())
+    .refine(v => v === "" || /^https:\/\/.+/i.test(v), "Must be an https:// URL")
+    .transform(v => (v === "" ? null : v))
+    .optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -43,7 +52,7 @@ export async function GET() {
 
   const { data, error } = await db
     .from("tenants")
-    .select("id, name, slug, owner_name, business_phone, business_email, service_area, logo_url, ghl_location_id, last_webhook_at")
+    .select("id, name, slug, owner_name, business_phone, business_email, service_area, logo_url, ghl_location_id, last_webhook_at, ghl_completion_webhook_url")
     .eq("id", tenantId)
     .single();
 
@@ -87,7 +96,7 @@ export async function PATCH(request: NextRequest) {
     .from("tenants")
     .update(result.data)
     .eq("id", tenantId)
-    .select("id, name, slug, owner_name, business_phone, business_email, service_area, logo_url, ghl_location_id, last_webhook_at")
+    .select("id, name, slug, owner_name, business_phone, business_email, service_area, logo_url, ghl_location_id, last_webhook_at, ghl_completion_webhook_url")
     .single();
 
   if (error) {

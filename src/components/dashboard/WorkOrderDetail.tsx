@@ -53,6 +53,7 @@ import { ChangeOrdersPanel } from "@/components/dashboard/ChangeOrdersPanel";
 import { WorkOrderTasksPanel } from "@/components/dashboard/WorkOrderTasksPanel";
 import { WorkOrderAttachmentsPanel } from "@/components/dashboard/WorkOrderAttachmentsPanel";
 import { JobCostingPanel } from "@/components/dashboard/JobCostingPanel";
+import { WorkOrderMap } from "@/components/dashboard/WorkOrderMap";
 import { cn } from "@/lib/utils";
 
 function money(cents: number): string {
@@ -1355,6 +1356,9 @@ export function WorkOrderDetail({
 
           {/* Job costing (Phase 9) — self-hides for roles without canViewJobCosting */}
           <JobCostingPanel workOrderId={workOrder.id} />
+
+          {/* Map (Phase 12) — property + assigned tech last-known location. Dispatch-gated. */}
+          {propertyId && perms?.canViewSchedule && <WorkOrderMap workOrderId={workOrder.id} />}
 
           {/* Property */}
           <SectionCard title="Property">

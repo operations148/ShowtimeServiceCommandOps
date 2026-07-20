@@ -292,6 +292,16 @@ export async function updateProperty(
     }
   }
 
+  // Phase 12: if any address component changed, invalidate the geocode cache so
+  // the map re-geocodes against the new address (lazily, on next view) rather
+  // than pinning the old location.
+  const addressFields: Array<keyof PatchPropertyInput> = ["address_line1", "address_line2", "city", "state", "zip"];
+  if (addressFields.some((f) => patch[f] !== undefined)) {
+    updatePayload.latitude = null;
+    updatePayload.longitude = null;
+    updatePayload.geocoded_at = null;
+  }
+
   const { data, error } = await db
     .from("properties")
     .update(updatePayload)

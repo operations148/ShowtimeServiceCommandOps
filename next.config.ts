@@ -53,7 +53,7 @@ const CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://*.supabase.co",
+  "img-src 'self' data: blob: https://*.supabase.co https://*.tile.openstreetmap.org",
   "font-src 'self' data:",
   "connect-src 'self' https://*.supabase.co https://api.stripe.com",
   "frame-src https://js.stripe.com https://hooks.stripe.com",
