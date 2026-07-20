@@ -11,12 +11,15 @@
 
 import { db } from "@/lib/db/client";
 import { updateOpportunity, createTask, type CreateTaskData } from "./client";
+import { postCompletionWebhook } from "./completion-webhook";
 import { updateWorkOrder } from "@/lib/db/queries/work-orders";
 import { markEstimateHandoffSentToGHL } from "@/lib/db/queries/estimate-handoffs";
 import { EstimateHandoffStatus } from "@/types/work-order";
 import { logger } from "@/lib/security/logger";
 
-export type GHLSyncJobType = "opportunity_won" | "task_create";
+// 'completion_webhook' (Phase 12, ADR-0018): payload = { url, body } — POSTs
+// the completion payload to the tenant's GHL Inbound Webhook trigger URL.
+export type GHLSyncJobType = "opportunity_won" | "task_create" | "completion_webhook";
 
 const MAX_ATTEMPTS = 8;
 const BASE_BACKOFF_SECONDS = 60; // attempt 2 retries ~2 min later, attempt 3 ~4 min, etc. (capped)
@@ -88,6 +91,13 @@ async function processOne(row: OutboxRow): Promise<{ ok: boolean; error?: string
         markEstimateHandoffSentToGHL(row.work_order_id, row.tenant_id, result.data.id),
       ]);
     }
+    return result.ok ? { ok: true } : { ok: false, error: result.error };
+  }
+
+  if (row.job_type === "completion_webhook") {
+    const { url, body } = row.payload as { url?: string; body?: Record<string, unknown> };
+    if (!url || !body) return { ok: false, error: "completion_webhook row missing url/body" };
+    const result = await postCompletionWebhook(url, body);
     return result.ok ? { ok: true } : { ok: false, error: result.error };
   }
 

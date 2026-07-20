@@ -214,6 +214,7 @@ function CompanyProfileSection() {
     business_phone: "",
     business_email: "",
     service_area: "",
+    ghl_completion_webhook_url: "",
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -236,6 +237,7 @@ function CompanyProfileSection() {
           business_phone: json.data.business_phone ?? "",
           business_email: json.data.business_email ?? "",
           service_area:   json.data.service_area ?? "",
+          ghl_completion_webhook_url: json.data.ghl_completion_webhook_url ?? "",
         });
       }
     } catch {
@@ -345,6 +347,16 @@ function CompanyProfileSection() {
 
           <FieldRow label="Service Area">
             <TextInput {...field("service_area")} placeholder="e.g. Los Angeles County, CA" />
+          </FieldRow>
+
+          <FieldRow label="Review Webhook URL">
+            <div>
+              <TextInput {...field("ghl_completion_webhook_url")} type="url" placeholder="https://services.leadconnectorhq.com/hooks/…" />
+              <p className="mt-1 text-xs text-slate-400">
+                Paste your GHL <strong>Inbound Webhook</strong> trigger URL. When a job is marked complete, ServiceOps posts the
+                work-order and customer details here — use it to fire your Google-review request workflow. Leave blank to disable.
+              </p>
+            </div>
           </FieldRow>
 
           <FieldRow label="Logo">

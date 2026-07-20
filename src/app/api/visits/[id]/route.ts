@@ -1,4 +1,4 @@
-import { type NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse, after } from "next/server";
 import { PatchVisitSchema } from "@/lib/validation/visit";
 import { getVisitById, updateVisit } from "@/lib/db/queries/visits";
 import { VisitStatus } from "@/types/visit";
@@ -6,6 +6,7 @@ import { WorkOrderStatus, EstimateHandoffStatus } from "@/types/work-order";
 import { updateWorkOrder, getWorkOrderById } from "@/lib/db/queries/work-orders";
 import { createEstimateHandoff } from "@/lib/db/queries/estimate-handoffs";
 import { syncEstimateToGhl } from "@/lib/ghl/sync-estimate";
+import { syncCompletionToGhl } from "@/lib/ghl/sync-completion";
 import { requireApiAuth, isTechnicianScoped, getTenantId } from "@/lib/auth/api-auth";
 import { resolveCompletionRuleForTenant } from "@/lib/db/queries/completion-requirements";
 import { resolveChecklistForCategory, writeVisitChecklistSnapshot } from "@/lib/db/queries/checklist-templates";
@@ -202,16 +203,39 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     updatedVisit.completion_message != null;
 
   if (completedNow) {
-    void updateWorkOrder(
-      updatedVisit.work_order_id,
-      {
-        status:                  WorkOrderStatus.COMPLETED,
-        tech_completion_message: updatedVisit.completion_message ?? undefined,
-        tech_completed_by:       updatedVisit.completed_by_name ?? undefined,
-        tech_completed_at:       updatedVisit.completed_at ?? new Date().toISOString(),
-      },
-      tenantId
-    ).catch((err) => console.error("[visits/PATCH] updateWorkOrder completion failed:", err));
+    // Runs after the response is sent (after() — same pattern as the admin
+    // work-order PATCH route); must never block or fail the tech's completion.
+    after(async () => {
+      try {
+        const woId = updatedVisit.work_order_id;
+        const priorWo = await getWorkOrderById(woId, tenantId);
+        const alreadyCompleted = priorWo?.status === WorkOrderStatus.COMPLETED;
+
+        await updateWorkOrder(
+          woId,
+          {
+            status:                  WorkOrderStatus.COMPLETED,
+            tech_completion_message: updatedVisit.completion_message ?? undefined,
+            tech_completed_by:       updatedVisit.completed_by_name ?? undefined,
+            tech_completed_at:       updatedVisit.completed_at ?? new Date().toISOString(),
+          },
+          tenantId
+        );
+
+        // Phase 12 fix (ADR-0018): this path previously updated the work order
+        // via a direct DB call and NEVER notified GHL — the admin PATCH route
+        // was the only trigger, so field-completed jobs (the majority) never
+        // fired the client's review workflow. Fire the same sync here, gated
+        // on the actual transition so a re-save of an already-completed work
+        // order doesn't re-fire the webhook.
+        if (!alreadyCompleted) {
+          const updatedWo = await getWorkOrderById(woId, tenantId);
+          if (updatedWo) await syncCompletionToGhl(updatedWo);
+        }
+      } catch (err) {
+        console.error("[visits/PATCH] completion side-effects failed:", err);
+      }
+    });
   }
 
   return NextResponse.json({ data: updatedVisit });
