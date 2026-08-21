@@ -96,7 +96,9 @@ async function buildWoAggregates(propIds: string[], tenantId: string): Promise<A
 
   const { data, error } = await db
     .from("work_orders")
-    .select("property_id, status, scheduled_date, users(name)")
+    // Explicit FK hint required — work_orders has three FKs to users, so a bare
+    // users(name) embed is ambiguous (PGRST201). See WO_SELECT in work-orders.ts.
+    .select("property_id, status, scheduled_date, users!work_orders_assigned_technician_id_fkey(name)")
     .in("property_id", propIds)
     .eq("tenant_id", tenantId);
 

@@ -215,7 +215,14 @@ export async function createWorkOrderFromGHLStage(
     : "";
 
   // ── Create ──────────────────────────────────────────────────────────────────
-  const workOrder = await createWorkOrderFull(
+  // A unique violation (23505) means a concurrent delivery inserted this row
+  // between our idempotency check and this insert — or that a legacy
+  // opportunity-level unique index still constrains the table. Either way the
+  // business outcome is "the row exists", so re-read the winner and report
+  // idempotent success instead of surfacing a masked failure.
+  let workOrder: WorkOrderWithRelations;
+  try {
+    workOrder = await createWorkOrderFull(
     {
       tenant_id:               tenantId,
       property_id:             property?.id ?? null,
@@ -235,7 +242,26 @@ export async function createWorkOrderFromGHLStage(
     },
     propertyAddress,
     customerName
-  );
+    );
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    const message = err instanceof Error ? err.message : String(err);
+    if (code === "23505" || message.includes("duplicate key")) {
+      const winner = await findByGhlOpportunityIdAndStage(payload.id, stageName, tenantId);
+      if (winner) {
+        console.log(`${tag} Unique violation resolved idempotently — existing WO ${winner.wo_number}.`);
+        return { outcome: "already_exists", workOrder: winner };
+      }
+      // Constrained by something other than (opportunity, stage) — most likely
+      // the legacy opportunity-level unique index, which would block the second
+      // trigger stage for an opportunity that already has a work order.
+      return {
+        outcome: "error",
+        reason: `unique violation with no matching (opportunity, stage) row — check for a stale opportunity-level unique index: ${message}`,
+      };
+    }
+    throw err;
+  }
 
   // Logged by WO number/property-linked flag only -- customerName is PII and
   // doesn't add debugging value once the WO number is present (security-audit M15).
@@ -256,12 +282,17 @@ export async function createWorkOrderFromGHLStage(
 //   • Diagnosis Completed → updates the Diagnosis Booked WO (only open WO)
 //   • In Progress / Completed/Won → updates the Estimate Approved WO (most recent open WO)
 
+/**
+ * Returns the updated work order's number, or null when no open work order
+ * matched. A DB failure throws rather than returning null, so the caller can
+ * tell "nothing to update" (a correct no-op) apart from "the update failed".
+ */
 export async function updateWorkOrderStatusByGHLOpportunity(
   ghlOpportunityId: string,
   newStatus: string,
   stageName: string,
   tenantId: string
-): Promise<void> {
+): Promise<string | null> {
   const tag = `[ghl/factory stage="${stageName}" opp="${ghlOpportunityId}"]`;
 
   const workOrder = await findOpenByGhlOpportunityId(ghlOpportunityId, tenantId);
@@ -271,7 +302,7 @@ export async function updateWorkOrderStatusByGHLOpportunity(
       `${tag} No open WO found for opportunity "${ghlOpportunityId}" — stage "${stageName}". ` +
       `WO may already be completed or cancelled.`
     );
-    return;
+    return null;
   }
 
   const isCompleting = newStatus === WorkOrderStatus.COMPLETED;
@@ -290,8 +321,9 @@ export async function updateWorkOrderStatusByGHLOpportunity(
     .eq("tenant_id", tenantId);
 
   if (error) {
-    console.error(`${tag} Failed to update WO ${workOrder.wo_number}: ${error.message}`);
-    return;
+    // Throw rather than swallow — the caller classifies this as retryable so
+    // the delivery is not recorded as processed when nothing changed.
+    throw new Error(`[ghl/factory] failed to update WO ${workOrder.wo_number}: ${error.message}`);
   }
 
   // Insert status history record (non-blocking on failure)
@@ -314,6 +346,8 @@ export async function updateWorkOrderStatusByGHLOpportunity(
     `${tag} Updated WO ${workOrder.wo_number} ` +
     `status: ${workOrder.status} → ${newStatus}`
   );
+
+  return workOrder.wo_number;
 }
 
 // ─── flagEstimateFromGHL ──────────────────────────────────────────────────────
@@ -323,10 +357,14 @@ export async function updateWorkOrderStatusByGHLOpportunity(
 // estimate_handoff_status to ESTIMATE_SENT. Also patches the estimate_handoffs
 // record if one exists.
 
+/**
+ * Returns the flagged work order's number, or null when no work order matched.
+ * DB failures throw so the caller can classify them as retryable.
+ */
 export async function flagEstimateFromGHL(
   ghlOpportunityId: string,
   tenantId: string
-): Promise<void> {
+): Promise<string | null> {
   const tag = `[ghl/factory stage="Estimate Sent" opp="${ghlOpportunityId}"]`;
 
   // Find the Diagnosis Booked WO (estimate relates to the diagnostic visit)
@@ -337,7 +375,7 @@ export async function flagEstimateFromGHL(
       `${tag} No WO found for opportunity "${ghlOpportunityId}". ` +
       `Cannot flag estimate. Skipping.`
     );
-    return;
+    return null;
   }
 
   // Update work order estimate_handoff_status
@@ -351,8 +389,7 @@ export async function flagEstimateFromGHL(
     .eq("tenant_id", tenantId);
 
   if (woErr) {
-    console.error(`${tag} Failed to update WO ${workOrder.wo_number}: ${woErr.message}`);
-    return;
+    throw new Error(`[ghl/factory] failed to flag estimate on WO ${workOrder.wo_number}: ${woErr.message}`);
   }
 
   // Best-effort: update estimate_handoffs record if one exists
@@ -371,4 +408,6 @@ export async function flagEstimateFromGHL(
   console.log(
     `${tag} Flagged estimate as ESTIMATE_SENT on WO ${workOrder.wo_number}`
   );
+
+  return workOrder.wo_number;
 }

@@ -1,0 +1,144 @@
+name: Database Concurrency & Migration Replay
+
+# Isolated database validation lane (Prompt 10B).
+#
+# Closes two gaps the default CI structurally cannot:
+#   1. Genuine multi-connection concurrency — two independent PostgreSQL
+#      backend sessions racing on the stage-level unique invariant. The
+#      default CI has no database at all, and PGlite is single-process.
+#   2. Complete tracked-migration replay with ZERO skips, using the test-only
+#      pre-history baseline in supabase/tests/bootstrap/.
+#
+# SAFETY — this workflow can only ever reach its own throwaway service
+# container:
+#   * The database is a job-scoped `postgres` service on localhost. It is
+#     destroyed with the runner.
+#   * Credentials are hardcoded throwaway locals. No repository secrets are
+#     referenced anywhere in this file.
+#   * A guard step fails the job if TEST_DATABASE_URL is non-local or contains
+#     the production Supabase project ref, and real-pg.ts asserts the same
+#     thing again in code before every single connection.
+#   * No Supabase CLI link, no `supabase db push`, no `--linked`, no
+#     production env vars.
+
+on:
+  push:
+    branches: [test/ghl-concurrency-proof]
+  pull_request:
+    paths:
+      - "supabase/migrations/**"
+      - "supabase/tests/bootstrap/**"
+      - "src/lib/db/queries/**"
+      - "src/lib/ghl/**"
+      - "src/app/api/ghl/webhooks/**"
+      - ".github/workflows/database-concurrency.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-concurrency-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  database-validation:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # Pinned to production's major version (verified: 17.6 / 170006).
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: serviceops_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # Throwaway, job-scoped, localhost only. Not a secret.
+      TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/serviceops_test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Safety gate — database target must be isolated and local
+        run: |
+          set -euo pipefail
+          echo "Validating TEST_DATABASE_URL host..."
+          case "$TEST_DATABASE_URL" in
+            *yyjbfjnpmjcraehecbvi*)
+              echo "FATAL: production Supabase project ref present in test DB URL."; exit 1 ;;
+            *supabase.co*|*supabase.com*)
+              echo "FATAL: hosted Supabase host present in test DB URL."; exit 1 ;;
+            postgresql://postgres:postgres@127.0.0.1:5432/*)
+              echo "OK: isolated local service container." ;;
+            *)
+              echo "FATAL: unexpected test DB URL shape."; exit 1 ;;
+          esac
+          # NOTE: deliberately no repo-wide grep for the production project ref
+          # here. The ref legitimately appears in this file and in
+          # real-pg.ts as a DENY-LIST value (something to refuse), so such a
+          # grep would always match itself and fail the job. The real guards
+          # are the URL check above plus assertIsolatedTestDatabase(), which
+          # runs in code before every connection.
+          echo "Safety gate passed."
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies (locked)
+        run: npm ci
+
+      - name: Wait for PostgreSQL
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            if pg_isready -h 127.0.0.1 -p 5432 -U postgres >/dev/null 2>&1; then
+              echo "PostgreSQL is ready."; exit 0
+            fi
+            sleep 2
+          done
+          echo "PostgreSQL did not become ready."; exit 1
+
+      - name: Report PostgreSQL server version
+        run: |
+          PGPASSWORD=postgres psql -h 127.0.0.1 -U postgres -d serviceops_test \
+            -c "SHOW server_version;" -c "SHOW server_version_num;"
+
+      - name: TypeScript
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit + PGlite integration tests
+        run: npm test -- --run
+
+      - name: REAL PostgreSQL migration replay + multi-connection concurrency
+        run: npx vitest run src/lib/db/queries/work-orders.concurrency.test.ts
+
+      - name: Production build
+        run: npm run build
+        env:
+          # Dummy values only — matches the existing ci.yml convention. No live
+          # service is contacted during `next build`.
+          NEXTAUTH_SECRET: ci-placeholder-secret-not-real
+          NEXTAUTH_URL: http://localhost:3000
+          NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key
+          GHL_WEBHOOK_SECRET: ci-placeholder-webhook-secret
+          GHL_PRIVATE_INTEGRATION_TOKEN: ci-placeholder-token
+          GHL_LOCATION_ID: ci-placeholder-location
+          CRON_SECRET: ci-placeholder-cron-secret

@@ -65,8 +65,13 @@ export async function GET(request: NextRequest) {
     });
     return NextResponse.json({ data: workOrders, total: workOrders.length });
   } catch (err) {
+    // A masked { data: [], total: 0 } here was indistinguishable from a
+    // genuinely empty tenant — the exact PGRST201 schema-ambiguity failure
+    // that took the Work Orders dashboard down rendered as a healthy "no
+    // work orders yet" empty state instead of a visible error (2026-05-08,
+    // 855b6e1). Matches every sibling work-order route's own catch shape.
     console.error("[api] GET /api/work-orders failed:", err);
-    return NextResponse.json({ data: [], total: 0 });
+    return NextResponse.json({ error: "Failed to load work orders" }, { status: 500 });
   }
 }
 

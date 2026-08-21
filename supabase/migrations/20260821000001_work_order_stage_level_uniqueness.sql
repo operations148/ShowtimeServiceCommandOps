@@ -1,0 +1,62 @@
+-- =============================================================================
+-- Migration — replace opportunity-level uniqueness with stage-level uniqueness
+--
+-- PROBLEM (proven against production, this investigation)
+--   idx_wo_ghl_opportunity_tenant, created by 20260506000005 and never touched
+--   since (confirmed by full tracked-history search), is UNIQUE on
+--   (ghl_opportunity_id, tenant_id) — no stage. Live production carries this
+--   exact index, confirmed via a corrected SQL Editor session after an earlier
+--   session had been connected to the wrong database.
+--
+--   Application code (src/lib/ghl/work-order-factory.ts) has intended
+--   per-(opportunity, stage) idempotency since it was written — one work order
+--   for "Diagnosis Booked", a separate one for "Estimate Approved" on the same
+--   opportunity, as the opportunity progresses through one linear pipeline.
+--   findByGhlOpportunityIdAndStage()'s own docstring says so explicitly. The
+--   live index has never matched that intent.
+--
+--   Effect: the FIRST creation stage for any opportunity succeeds. The SECOND
+--   stage for that same opportunity hits idx_wo_ghl_opportunity_tenant and
+--   fails with 23505 — a real, proven failure mode, currently latent only
+--   because zero GHL-linked work orders have ever been created in production.
+--   It would surface the moment the webhook-intake fix in this same change
+--   set starts successfully creating work orders, and would look like a
+--   regression introduced by that fix rather than a five-month-old gap.
+--
+-- PRECONDITION — verified this investigation, not assumed
+--   0 work_orders rows currently have both ghl_opportunity_id and
+--   ghl_trigger_stage set (2 total rows in production, both manual, both
+--   GHL columns NULL). The old index governs zero rows; the new index would
+--   govern zero existing rows. Dropping/creating is safe with no data to
+--   violate either constraint.
+--
+-- NORMALIZATION — deliberately NOT an expression index
+--   ghl_trigger_stage is stored in the casing GHL sent, and the application's
+--   own lookup (findByGhlOpportunityIdAndStage) is an exact-match .eq() on the
+--   raw column. An expression index such as UNIQUE (..., lower(btrim(...)))
+--   without a matching change to that lookup would make failures WORSE: the
+--   database would correctly reject a case-varied duplicate, but the
+--   application's exact-match re-read after a 23505 would fail to find the
+--   winning row and would surface as an unresolved error instead of an
+--   idempotent success. This migration matches today's actual application
+--   code. Case-insensitive stage matching is a separate, tracked, low-priority
+--   improvement (GHL sends one canonical stage-name string per pipeline stage
+--   from its own configuration, not free text, so real casing drift between
+--   two deliveries of the same stage has low practical likelihood).
+--
+-- LOCK / DURATION
+--   ACCESS EXCLUSIVE on work_orders for both statements, microseconds at
+--   current row count (2 rows total, 0 matching either predicate).
+--   CREATE INDEX CONCURRENTLY is not used: it cannot run inside a transaction,
+--   and `supabase db push` applies each migration transactionally.
+--
+-- NO "IF NOT EXISTS" on the CREATE, deliberately: if an object named
+-- idx_wo_tenant_opportunity_stage_unique already exists with a different
+-- definition, this must fail loudly rather than silently keep the old one.
+-- =============================================================================
+
+DROP INDEX IF EXISTS public.idx_wo_ghl_opportunity_tenant;
+
+CREATE UNIQUE INDEX idx_wo_tenant_opportunity_stage_unique
+  ON public.work_orders (tenant_id, ghl_opportunity_id, ghl_trigger_stage)
+  WHERE ghl_opportunity_id IS NOT NULL AND ghl_trigger_stage IS NOT NULL;
