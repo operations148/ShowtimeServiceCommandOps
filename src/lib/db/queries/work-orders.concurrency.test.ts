@@ -72,7 +72,7 @@ describeReal("REAL multi-connection concurrency", () => {
 
   beforeAll(async () => {
     admin = await connect(TEST_DB_URL!);
-    const replay = await replayAllMigrations(admin);
+    const replay = await replayAllMigrations(admin, TEST_DB_URL!);
     // Gate: zero skipped migrations on the real server too.
     expect(replay.appliedMigrations.length).toBe(replay.totalOnDisk);
     await seedTenant(admin, RPG_FIXTURE.tenantA, "a1");

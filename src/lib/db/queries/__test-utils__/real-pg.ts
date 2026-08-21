@@ -84,8 +84,31 @@ export interface ReplayResult {
  * Applies the Supabase-platform stubs, then every tracked migration in
  * timestamp order with the test-only pre-history baseline injected at its
  * insertion points. NO migration is skipped.
+ *
+ * Starts by DROPPING and recreating the schemas, so the replay is a true
+ * from-scratch run and is safe to invoke more than once against the same
+ * container (vitest runs this suite both in the full `npm test` sweep and in
+ * its own dedicated CI step — without a clean slate the second run fails with
+ * "type user_role already exists").
+ *
+ * `connectionString` is required purely so the isolation guard can run again
+ * immediately before destructive DDL. This function drops schemas; it must be
+ * impossible to aim it at anything but a throwaway test database.
  */
-export async function replayAllMigrations(client: Client): Promise<ReplayResult> {
+export async function replayAllMigrations(
+  client: Client,
+  connectionString: string,
+): Promise<ReplayResult> {
+  // Re-assert before any DROP. Defence in depth on top of connect()'s check.
+  assertIsolatedTestDatabase(connectionString);
+
+  await client.query(`
+    DROP SCHEMA IF EXISTS public CASCADE;
+    DROP SCHEMA IF EXISTS auth CASCADE;
+    CREATE SCHEMA public;
+    GRANT ALL ON SCHEMA public TO public;
+  `);
+
   await client.query(`
     DO $$ BEGIN
       IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon NOLOGIN; END IF;
