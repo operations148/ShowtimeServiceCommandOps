@@ -141,4 +141,12 @@ jobs:
           GHL_WEBHOOK_SECRET: ci-placeholder-webhook-secret
           GHL_PRIVATE_INTEGRATION_TOKEN: ci-placeholder-token
           GHL_LOCATION_ID: ci-placeholder-location
+          # Same synthetic mapping as ci.yml. validate-env.sh requires this var
+          # AND checks that the map contains GHL_LOCATION_ID, so the key below
+          # must stay byte-identical to the value above. This env block is a
+          # duplicate of ci.yml's; when one gains a required var, so must the
+          # other -- which is exactly how this step broke.
+          # Throwaway values only: no real GHL location id or tenant id.
+          # Quoted because an unquoted leading `{` is a YAML flow mapping.
+          GHL_LOCATION_TO_TENANT: '{"ci-placeholder-location":"00000000-0000-0000-0000-000000000000"}'
           CRON_SECRET: ci-placeholder-cron-secret
