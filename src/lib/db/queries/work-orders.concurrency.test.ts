@@ -89,6 +89,11 @@ describeReal("REAL multi-connection concurrency", () => {
   });
 
   beforeEach(async () => {
+    // Clear any transaction a previous test left open or aborted. Without
+    // this, one failure cascades into every later test as 25P02
+    // ("current transaction is aborted"). Harmless no-op when idle.
+    await sessionA.query("ROLLBACK").catch(() => {});
+    await sessionB.query("ROLLBACK").catch(() => {});
     await admin.query("DELETE FROM work_orders");
     await admin.query("DELETE FROM webhook_events");
   });
@@ -107,6 +112,11 @@ describeReal("REAL multi-connection concurrency", () => {
 
   it("deterministically interleaves: B blocks on A's uncommitted insert, then gets 23505 and resolves to the winner", async () => {
     const { tenantA, opp, contact, stage } = RPG_FIXTURE;
+
+    // Capture B's backend PID *before* it is blocked. Asking a blocked session
+    // for its own PID would queue behind its stuck INSERT and never return —
+    // that self-deadlock is exactly what timed this test out on the first CI run.
+    const bPid = (await sessionB.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]!.pid;
 
     // 1. No work order exists for the business key.
     const pre = await admin.query(FIND_BY_BUSINESS_KEY, [tenantA, opp, stage]);
@@ -140,13 +150,15 @@ describeReal("REAL multi-connection concurrency", () => {
     await new Promise((r) => setTimeout(r, 1000));
     expect(bSettled).toBe(false);
 
-    // Independent confirmation from the server's own wait graph.
-    const waiting = await admin.query<{ cnt: string }>(
-      `SELECT count(*)::text AS cnt FROM pg_stat_activity
-       WHERE wait_event_type = 'Lock' AND pid = $1`,
-      [(await sessionB.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")).rows[0]!.pid],
+    // Independent confirmation from the server's own wait graph — queried via
+    // the ADMIN session, never via the blocked session itself.
+    const waiting = await admin.query<{ wait_event_type: string | null; state: string }>(
+      `SELECT wait_event_type, state FROM pg_stat_activity WHERE pid = $1`, [bPid],
     );
-    expect(Number(waiting.rows[0]!.cnt)).toBe(1);
+    expect(waiting.rows).toHaveLength(1);
+    // PostgreSQL reports the blocked inserter as waiting on a Lock (the
+    // winner's still-open transactionid).
+    expect(waiting.rows[0]!.wait_event_type).toBe("Lock");
 
     // 6. A commits — its insert wins.
     await sessionA.query("COMMIT");
