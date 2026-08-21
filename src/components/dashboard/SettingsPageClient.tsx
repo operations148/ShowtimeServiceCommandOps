@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { cn } from "@/lib/utils";
+import { useApiQuery } from "@/lib/utils/useApiQuery";
 import type { CompanyProfile } from "@/app/api/settings/company/route";
 import { StripeConnectSection } from "@/components/dashboard/StripeConnectSection";
 
@@ -176,7 +177,10 @@ function StatusRow({
 }: {
   label: string;
   value: string;
-  status?: "ok" | "warn" | "neutral";
+  // "error" is distinct from "warn": warn = not configured / unknown,
+  // error = actively verified as broken. A failed GHL credential check must
+  // not look like a mild warning.
+  status?: "ok" | "warn" | "error" | "neutral";
   copyValue?: string;
   masked?: boolean;
 }) {
@@ -186,12 +190,14 @@ function StatusRow({
       <div className="flex items-center gap-1.5 min-w-0">
         {status === "ok" && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />}
         {status === "warn" && <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />}
+        {status === "error" && <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-red-500" />}
         <span
           className={cn(
             "text-sm font-medium truncate",
             masked && "font-mono tracking-widest text-slate-400",
             status === "ok" && "text-emerald-700",
             status === "warn" && "text-amber-700",
+            status === "error" && "text-red-700",
             status === "neutral" && "text-slate-700",
             !status && "text-slate-700"
           )}
@@ -427,9 +433,55 @@ function CompanyProfileSection() {
 
 // ─── GHL Integration section ──────────────────────────────────────────────────
 
+interface GhlStatus {
+  configured: {
+    locationId: boolean;
+    webhookSecret: boolean;
+    privateToken: boolean;
+    locationToTenantMap: boolean;
+  };
+  tenantMapped: boolean;
+  apiReachable: boolean | null;
+  apiError: string | null;
+  checkedAt: string;
+}
+
+const GHL_API_ERROR_LABEL: Record<string, string> = {
+  credentials_rejected: "Rejected — token invalid or expired",
+  location_not_found: "Location not found in GHL",
+  rate_limited: "Rate limited by GHL",
+  network_error: "Unreachable — network error",
+  provider_error: "GHL returned an error",
+};
+
 function GHLIntegrationSection() {
-  const webhookUrl = `${typeof window !== "undefined" ? window.location.origin : "https://serviceops-ghl-workorders.vercel.app"}/api/ghl/webhooks`;
+  const webhookUrl =
+    typeof window !== "undefined" ? `${window.location.origin}/api/ghl/webhooks` : "";
   const locationId = process.env.NEXT_PUBLIC_GHL_LOCATION_ID ?? null;
+
+  // Real, server-verified status. The old panel rendered "Connected" purely
+  // from the presence of this build-time NEXT_PUBLIC_GHL_LOCATION_ID string —
+  // so it read "Connected" throughout an incident in which every inbound
+  // webhook was failing. Configuration presence is now shown separately from
+  // tenant mapping and from an actual authenticated GHL API call.
+  const { data: status, error, loading } =
+    useApiQuery<GhlStatus>("/api/settings/ghl-status");
+
+  const apiConnectionValue = (() => {
+    if (loading) return "Checking…";
+    if (error) return "Status check unavailable";
+    if (!status) return "Unknown";
+    if (status.apiReachable === null) return "Not tested — credentials missing";
+    if (status.apiReachable) return "Verified just now";
+    return GHL_API_ERROR_LABEL[status.apiError ?? ""] ?? "Connection failed";
+  })();
+
+  const apiConnectionStatus: "ok" | "warn" | "error" | "neutral" = (() => {
+    if (loading) return "neutral";
+    if (error || !status) return "warn";
+    if (status.apiReachable === null) return "warn";
+    return status.apiReachable ? "ok" : "error";
+  })();
 
   return (
     <SettingsSection
@@ -444,9 +496,20 @@ function GHLIntegrationSection() {
           status={locationId ? "ok" : "warn"}
         />
         <StatusRow
+          label="Tenant Mapping"
+          value={
+            loading
+              ? "Checking…"
+              : status?.tenantMapped
+                ? "This location maps to your tenant"
+                : "Not mapped — inbound webhooks would be discarded"
+          }
+          status={loading ? "neutral" : status?.tenantMapped ? "ok" : "error"}
+        />
+        <StatusRow
           label="API Connection"
-          value={locationId ? "Connected" : "Not configured"}
-          status={locationId ? "ok" : "warn"}
+          value={apiConnectionValue}
+          status={apiConnectionStatus}
         />
         <StatusRow
           label="Webhook URL"

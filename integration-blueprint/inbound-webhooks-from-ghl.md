@@ -31,7 +31,7 @@ It is only used server-side when ServiceOps calls the GHL API outbound.
 ## Endpoint
 
 ```
-POST https://serviceops-ghl-workorders.vercel.app/api/ghl/webhooks
+POST https://serviceops-ghl-workorders-chi.vercel.app/api/ghl/webhooks
 ```
 
 ---
@@ -55,13 +55,13 @@ Authorization: Bearer <key_value>
 ### Option B — Query Parameter (fallback if Custom Webhook unavailable)
 Append the secret to the webhook URL:
 ```
-https://serviceops-ghl-workorders.vercel.app/api/ghl/webhooks?token=<GHL_WEBHOOK_SECRET>
+https://serviceops-ghl-workorders-chi.vercel.app/api/ghl/webhooks?token=<GHL_WEBHOOK_SECRET>
 ```
 
 ### Health check
 To confirm the secret is loaded in the deployed app:
 ```
-GET https://serviceops-ghl-workorders.vercel.app/api/ghl/webhooks/health
+GET https://serviceops-ghl-workorders-chi.vercel.app/api/ghl/webhooks/health
 → { "ok": true, "webhookSecretConfigured": true, "secretLength": N }
 ```
 

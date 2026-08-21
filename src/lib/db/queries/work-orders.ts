@@ -142,9 +142,20 @@ function mapRow(row: WoJoinedRow): WorkOrderWithRelations {
   };
 }
 
-// Joined select used by all read queries
-const WO_SELECT =
-  "*, properties(customer_name, address_line1, city, state, zip), users(name)";
+// Joined select used by all read queries.
+//
+// The users embed MUST name its foreign key explicitly. work_orders has three
+// FKs to users (assigned_technician_id, archived_by, closed_by — the latter two
+// added in Phase 5), so a bare `users(name)` is ambiguous and PostgREST rejects
+// the whole query with PGRST201 "more than one relationship was found". That
+// failure took down every work-order read and write at once, and because
+// GET /api/work-orders catches query errors and returns an empty list, it
+// surfaced as a silently empty dashboard rather than an error.
+//
+// Keep the `!work_orders_assigned_technician_id_fkey` hint on any future
+// users embed here. The response key stays `users`, so mapRow is unchanged.
+export const WO_SELECT =
+  "*, properties(customer_name, address_line1, city, state, zip), users!work_orders_assigned_technician_id_fkey(name)";
 
 // ---------------------------------------------------------------------------
 // Re-exported result types (same surface as mock store so routes don't change)
@@ -352,7 +363,14 @@ export async function createWorkOrderFull(
     .select(WO_SELECT)
     .single();
 
-  if (error) throw new Error(`[db] createWorkOrderFull: ${error.message}`);
+  if (error) {
+    // Preserve the Postgres SQLSTATE so callers can tell a unique violation
+    // (23505 — a concurrent delivery already inserted this row) apart from a
+    // genuine failure, instead of having to string-match the message.
+    const wrapped = new Error(`[db] createWorkOrderFull: ${error.message}`) as Error & { code?: string };
+    wrapped.code = error.code;
+    throw wrapped;
+  }
 
   const wo = mapRow(data as unknown as WoJoinedRow);
   // If the joined data didn't resolve, override with the caller-supplied denormalized fields

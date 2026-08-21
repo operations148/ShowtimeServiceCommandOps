@@ -5,6 +5,41 @@
 
 ---
 
+## Stage contract (authoritative)
+
+Routing is driven by the **exact stage name** in
+`src/lib/constants/ghl-pipeline.ts`, matched case-insensitively after trimming.
+Only these stages act:
+
+| Stage | Effect |
+|---|---|
+| `Diagnosis Booked` | **Creates** a work order (`pool_inspection_diagnostic`) |
+| `Estimate Approved` | **Creates** a work order (`pool_repair`) |
+| `Diagnosis Completed` | Updates existing WO → `completed` |
+| `In Progress` | Updates existing WO → `in_progress` |
+| `Completed/Won` | Updates existing WO → `completed` |
+| `Estimate Sent` | Flags `estimate_handoff_status` |
+| any other real stage | No action — recorded as `ignored_non_action_stage` |
+
+One opportunity may legitimately produce **two** work orders — one per creation
+stage — enforced by `UNIQUE (tenant_id, ghl_opportunity_id, ghl_trigger_stage)`.
+
+**Two corrections to earlier revisions of this document:**
+
+1. Earlier examples used a stage named `Scheduled`. **No such stage exists** in
+   the Showtime pipeline. It came from the old substring-matching helper
+   (`isJobReadyStage` / `GHL_JOB_READY_STAGES`), which is **dead code** — it is
+   not reachable from the active webhook route. `GHL_JOB_READY_STAGES` has no
+   effect on inbound routing despite being set in the environment.
+2. "job-ready stage" is obsolete terminology. The contract is the exact stage
+   table above.
+
+An **absent** stage name is not the same as a non-actionable one: a missing
+`pipelineStageName` is a workflow misconfiguration and is recorded as
+`rejected_validation`, not `ignored_non_action_stage`.
+
+---
+
 ## Required env vars for full coverage
 
 ```
@@ -50,7 +85,7 @@ x-ghl-signature: <HMAC-SHA256 of body using GHL_WEBHOOK_SECRET>
   "pipelineStageId": "stage_Xw3YzA1bCdEfGh",
   "pipelineStage": {
     "id": "stage_Xw3YzA1bCdEfGh",
-    "name": "Scheduled"
+    "name": "Diagnosis Booked"
   },
   "status": "open",
   "assignedTo": "ghl_user_Jk5LmNpQrStUvW",
@@ -83,7 +118,7 @@ x-ghl-signature: <HMAC-SHA256 of body using GHL_WEBHOOK_SECRET>
 [ghl/opportunity id=opp-test-tc001] Created WorkOrder "wo-..." (...) status="assigned" category="other" tenant="tenant-showtime"
 [ghl/webhooks] OpportunityStatusChange → created WorkOrder WO-...
 ```
-> `category="other"` unless `GHL_CF_OPP_SERVICE_CAT` is also configured. Stage name "Scheduled"
+> `category="other"` unless `GHL_CF_OPP_SERVICE_CAT` is also configured. Stage name "Diagnosis Booked"
 > has no category keyword match — set the custom field env var to get `weekly_pool_maintenance`.
 
 **Expected WorkOrder fields**:
@@ -123,7 +158,7 @@ x-ghl-signature: 000000000000000000000000000000000000000000000000000000000000000
   "type": "OpportunityStatusChange",
   "locationId": "ve9EPM428h8vShlRW1KT",
   "id": "opp-test-tc002",
-  "pipelineStage": { "id": "stage_x", "name": "Scheduled" },
+  "pipelineStage": { "id": "stage_x", "name": "Diagnosis Booked" },
   "status": "open",
   "contact": { "id": "ghl-cnt-rodriguez-001" }
 }
@@ -193,7 +228,7 @@ x-ghl-signature: <valid HMAC, or unset GHL_WEBHOOK_SECRET>
   "locationId": "ve9EPM428h8vShlRW1KT",
   "id": "opp-test-tc004",
   "name": "Orphaned Opportunity — no contact",
-  "pipelineStage": { "id": "stage_x", "name": "Scheduled" },
+  "pipelineStage": { "id": "stage_x", "name": "Diagnosis Booked" },
   "status": "open",
   "contact": {}
 }
@@ -259,7 +294,7 @@ x-ghl-signature: <valid HMAC, or unset GHL_WEBHOOK_SECRET>
 
 | ID         | Scenario                         | Expected HTTP | WorkOrder created? |
 |------------|----------------------------------|---------------|--------------------|
-| TC-GHL-001 | Valid payload, job-ready stage   | 200           | Yes                |
+| TC-GHL-001 | Valid payload, creation stage   | 200           | Yes                |
 | TC-GHL-002 | Invalid signature                | 401           | No                 |
 | TC-GHL-003 | Duplicate (replay of TC-GHL-001) | 200           | No — idempotent    |
 | TC-GHL-004 | Missing contact.id               | 200           | No — skipped       |

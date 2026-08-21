@@ -67,6 +67,15 @@ jobs:
           GHL_WEBHOOK_SECRET: ci-placeholder-webhook-secret
           GHL_PRIVATE_INTEGRATION_TOKEN: ci-placeholder-token
           GHL_LOCATION_ID: ci-placeholder-location
+          # The strengthened validator (Phase 11) requires this var AND checks
+          # that the map actually contains GHL_LOCATION_ID -- without it the
+          # build step fails before `next build` even starts. The key below
+          # must stay byte-identical to GHL_LOCATION_ID above.
+          # Synthetic throwaway values: the tenant is the all-zero UUID and the
+          # location is the same "ci-placeholder-location" string used above.
+          # No real GHL location id or tenant id belongs in this file.
+          # Quoted because an unquoted leading `{` is a YAML flow mapping.
+          GHL_LOCATION_TO_TENANT: '{"ci-placeholder-location":"00000000-0000-0000-0000-000000000000"}'
           CRON_SECRET: ci-placeholder-cron-secret
 
       - name: Dependency audit
