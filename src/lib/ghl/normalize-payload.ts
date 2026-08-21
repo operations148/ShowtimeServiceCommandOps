@@ -81,6 +81,27 @@ export function parseAppointmentTime(raw: string | null): string | null {
   return match ? match[1]! : null;
 }
 
+/**
+ * The real pipeline-stage name for a payload, or null when there isn't one.
+ *
+ * `pipelineStage` exists on only some members of the GHLWebhookPayload union,
+ * so reading it directly does not typecheck; the `in` guard narrows safely.
+ *
+ * Returns null — never "" and never a placeholder — when the stage is absent
+ * or blank. normalizeGHLPayload() builds `{ id, name: "" }` when it found a
+ * stage ID but no stage name, and an empty name is not a stage.
+ *
+ * This is the single source for the `stage` field in structured logs. It must
+ * never be substituted with outcome.detail, which is a reason string for most
+ * outcomes.
+ */
+export function stageNameOf(payload: GHLWebhookPayload): string | null {
+  if (!("pipelineStage" in payload)) return null;
+  const stage = payload.pipelineStage as { name?: unknown } | undefined;
+  const name = typeof stage?.name === "string" ? stage.name.trim() : "";
+  return name === "" ? null : name;
+}
+
 export interface NormalizedPayload {
   payload: GHLWebhookPayload;
   /** Field-presence booleans for safe structured logging — never the values. */

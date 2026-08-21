@@ -1,3 +1,25 @@
+// ⚠️  DEAD MODULE — NOT ON THE ACTIVE INBOUND PATH. DO NOT EXTEND.
+//
+// `createWorkOrderFromGHL` has ZERO importers anywhere in src/ (verified by
+// call-graph trace). The live OpportunityStatusChange path is:
+//   src/app/api/ghl/webhooks/route.ts
+//     -> src/lib/ghl/dispatch.ts
+//       -> src/lib/ghl/work-order-factory.ts :: createWorkOrderFromGHLStage
+//
+// The two differ in a way that matters, which is why confusing them is
+// dangerous:
+//   * This module gates on isJobReadyStage() — loose SUBSTRING matching driven
+//     by GHL_JOB_READY_STAGES. That env var therefore has no effect on real
+//     inbound traffic, despite being set in production.
+//   * The live factory matches EXACT stage names from
+//     src/lib/constants/ghl-pipeline.ts and enforces per-(opportunity, stage)
+//     idempotency.
+//
+// Kept rather than deleted: removal is a separate, independently reviewable
+// change, and this incident's repair deliberately stayed minimal. If you are
+// debugging why a stage did or did not create a work order, this file is not
+// the code that ran.
+//
 // Orchestrates WorkOrder creation from a GHL OpportunityStatusChange payload.
 //
 // Processing order (mirrors ghl-opportunity-mapping.md § Upsert Logic):

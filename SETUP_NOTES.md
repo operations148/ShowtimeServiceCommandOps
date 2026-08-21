@@ -2,7 +2,7 @@
 
 ## Current Status
 
-The app is **live in production** at `https://serviceops-ghl-workorders.vercel.app`.
+The app is **live in production** at `https://serviceops-ghl-workorders-chi.vercel.app`.
 This is not a scaffold — all modules are built and deployed.
 
 ---
@@ -49,7 +49,7 @@ See `integration-blueprint/ghl-workflow-triggers.md` for full step-by-step.
 **Short version:**
 1. GHL → Automations → Workflows → New Workflow
 2. Trigger: Pipeline Stage Changed → filter to `Diagnosis Booked`
-3. Action: **Custom Webhook** → POST to `https://serviceops-ghl-workorders.vercel.app/api/ghl/webhooks`
+3. Action: **Custom Webhook** → POST to `https://serviceops-ghl-workorders-chi.vercel.app/api/ghl/webhooks`
 4. Header: `Authorization: Bearer <GHL_WEBHOOK_SECRET>` ← use `GHL_WEBHOOK_SECRET`, not the integration token
 5. Body: JSON payload with opportunity/contact merge fields (see trigger doc)
 6. Repeat for `Estimate Approved`, `In Progress`, `Diagnosis Completed`

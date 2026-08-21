@@ -1,12 +1,13 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createHmac, createHash, timingSafeEqual, randomUUID } from "crypto";
-import { normalizeGHLPayload } from "@/lib/ghl/normalize-payload";
+import { normalizeGHLPayload, stageNameOf } from "@/lib/ghl/normalize-payload";
 import { dispatch } from "@/lib/ghl/dispatch";
 import {
   type WebhookOutcome,
   ledgerStatusFor,
   httpStatusFor,
-  isTerminalLedgerStatus,
+  decideClaim,
+  sanitizeDetail,
 } from "@/lib/ghl/webhook-outcome";
 import { logger } from "@/lib/security/logger";
 import { db } from "@/lib/db/client";
@@ -160,7 +161,7 @@ export async function POST(request: NextRequest) {
 
   const { data: existingEvent, error: lookupError } = await db
     .from("webhook_events")
-    .select("id, processing_status, attempt_count")
+    .select("id, processing_status, attempt_count, received_at")
     .eq("provider", "ghl")
     .eq("event_id", payloadHash)
     .maybeSingle();
@@ -174,11 +175,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Temporarily unavailable" }, { status: 500 });
   }
 
-  if (isTerminalLedgerStatus(existingEvent?.processing_status)) {
+  const claim = decideClaim(existingEvent);
+
+  if (claim === "duplicate_terminal") {
     logger.info("[ghl/webhooks] duplicate delivery — already finalized", {
       correlationId, hashPrefix, priorStatus: existingEvent!.processing_status,
     });
     return NextResponse.json({ received: true, duplicate: true }, { status: 200 });
+  }
+
+  if (claim === "in_flight") {
+    // Another invocation claimed this exact payload less than one function
+    // timeout ago and is probably still running it. Dispatching now would run
+    // the same business logic twice concurrently. Answer 200 (this is not a
+    // failure — the other invocation owns the work) without reprocessing.
+    logger.info("[ghl/webhooks] duplicate delivery — claim still in flight, not reprocessing", {
+      correlationId, hashPrefix,
+    });
+    return NextResponse.json({ received: true, duplicate: true, inFlight: true }, { status: 200 });
+  }
+
+  if (claim === "retry_stale" && existingEvent?.processing_status === "processing") {
+    logger.warn("[ghl/webhooks] reclaiming a stale processing row past its lease", {
+      correlationId, hashPrefix, priorAttempts: existingEvent.attempt_count ?? 0,
+    });
   }
 
   const attemptCount = (existingEvent?.attempt_count ?? 0) + 1;
@@ -252,7 +272,11 @@ export async function POST(request: NextRequest) {
     .update({
       processing_status: ledgerStatus,
       outcome_code:      outcome.code,
-      last_error:        ledgerStatus.startsWith("failed") ? (outcome.detail ?? outcome.code) : null,
+      // Sanitized for the same reason as the log line below: an unhandled
+      // Postgres error can carry the conflicting tenant/opportunity values.
+      last_error:        ledgerStatus.startsWith("failed")
+        ? (sanitizeDetail(outcome.detail) ?? outcome.code)
+        : null,
       processed_at:      new Date().toISOString(),
     })
     .eq("provider", "ghl")
@@ -267,13 +291,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Temporarily unavailable" }, { status: 500 });
   }
 
+  // Structured, redacted completion record. Everything here is safe to ship to
+  // a log aggregator: no raw payload, no contact name/email/phone/address, no
+  // secret, and no full opportunity or contact identifier — `detail` is passed
+  // through sanitizeDetail(), which is what actually enforces that last part.
   logger[ledgerStatus.startsWith("failed") ? "warn" : "info"]("[ghl/webhooks] processed", {
     correlationId,
     hashPrefix,
+    attempt: attemptCount,
+    eventType: payload.type,
+    // The REAL pipeline stage, straight from the normalized payload — never
+    // outcome.detail, which is a reason string for most outcomes and only
+    // coincidentally a stage name for a few. A previous revision logged detail
+    // here, so "stage" read e.g. "missing opportunity id". Absent stays null;
+    // nothing is fabricated to fill the field.
+    stage: stageNameOf(payload),
+    // Tenant resolution reported as an outcome, not an identifier.
+    tenantResolved: outcome.code !== "unknown_tenant" && presence.locationId,
     outcome: outcome.code,
     ledgerStatus,
     httpStatus,
-    detail: outcome.detail,
+    retryable: ledgerStatus === "failed_retryable",
+    detail: sanitizeDetail(outcome.detail),
     workOrder: outcome.workOrderNumber,
   });
 

@@ -23,7 +23,7 @@ It is only used server-side when ServiceOps calls the GHL API.
 ## Prerequisites
 
 - `GHL_WEBHOOK_SECRET` set in Vercel (already done)
-- App deployed at `https://serviceops-ghl-workorders.vercel.app` (already done)
+- App deployed at `https://serviceops-ghl-workorders-chi.vercel.app` (already done)
 
 ---
 
@@ -41,7 +41,7 @@ Use **Custom Webhook** when available in the workflow action list — it support
 headers and a fully configurable JSON body.
 
 - Method: `POST`
-- URL: `https://serviceops-ghl-workorders.vercel.app/api/ghl/webhooks`
+- URL: `https://serviceops-ghl-workorders-chi.vercel.app/api/ghl/webhooks`
 - Headers:
   ```
   Authorization: Bearer <GHL_WEBHOOK_SECRET value>
@@ -77,7 +77,7 @@ headers and a fully configurable JSON body.
 
 > **Fallback:** If "Custom Webhook" is not available in your GHL account, use
 > **Webhook** or **Outbound Webhook** instead, and append the token as a query param:
-> `https://serviceops-ghl-workorders.vercel.app/api/ghl/webhooks?token=<GHL_WEBHOOK_SECRET>`
+> `https://serviceops-ghl-workorders-chi.vercel.app/api/ghl/webhooks?token=<GHL_WEBHOOK_SECRET>`
 
 ---
 

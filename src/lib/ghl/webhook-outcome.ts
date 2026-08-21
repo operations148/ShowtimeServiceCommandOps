@@ -114,3 +114,92 @@ export function httpStatusFor(code: WebhookOutcomeCode): number {
 export function isTerminalLedgerStatus(status: string | null | undefined): boolean {
   return status === "done" || status === "ignored" || status === "failed_permanent";
 }
+
+/**
+ * How long a 'processing' claim is considered live before another delivery
+ * may take it over.
+ *
+ * Vercel's function timeout for this project is 300s, so a claim younger than
+ * that may still be genuinely in flight. Anything older cannot be — the
+ * function that made it is dead (timeout, crash, or instance teardown) and
+ * would otherwise strand the row in 'processing' forever.
+ */
+export const PROCESSING_LEASE_MS = 300_000;
+
+/** Longest detail string we will ever emit. */
+export const MAX_DETAIL_LENGTH = 200;
+
+/**
+ * Makes an outcome `detail` safe to write to a log aggregator or the ledger.
+ *
+ * Most details are fixed reason strings or GHL stage names, which are safe.
+ * Two paths are NOT: the webhook route's catch-all wraps `err.message`, and
+ * work-order-factory's unique-violation branch embeds the raw Postgres
+ * message. A Postgres unique violation reads like
+ *   Key (tenant_id, ghl_opportunity_id, ...)=(<uuid>, <oppId>, ...) already exists.
+ * so the conflicting VALUES — tenant UUID and GHL opportunity id — end up
+ * inside the string. An earlier revision of this file claimed detail was
+ * "only ever set from stage names and internal reason strings"; that was
+ * wrong, and this function is what makes the claim true.
+ *
+ * Redacts rather than drops: knowing a unique violation occurred is the
+ * operationally useful part, and the identifiers are not.
+ */
+export function sanitizeDetail(detail: string | null | undefined): string | undefined {
+  if (detail === null || detail === undefined) return undefined;
+  const redacted = detail
+    // Postgres "Key (cols)=(values)" — the values are the leak.
+    .replace(/Key \(([^)]*)\)=\([^)]*\)/gi, "Key ($1)=[redacted]")
+    // Any UUID (tenant ids, work order ids, property ids).
+    .replace(
+      /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+      "[id]",
+    )
+    // Long unbroken alphanumeric runs — GHL location/opportunity/contact ids.
+    // Stage names ("Diagnosis Booked") and SCREAMING_SNAKE env names are
+    // unaffected: neither contains a 20+ character unbroken alphanumeric run.
+    .replace(/\b[A-Za-z0-9]{20,}\b/g, "[id]");
+
+  return redacted.length > MAX_DETAIL_LENGTH
+    ? `${redacted.slice(0, MAX_DETAIL_LENGTH)}…`
+    : redacted;
+}
+
+export type ClaimDecision = "fresh" | "duplicate_terminal" | "retry_stale" | "in_flight";
+
+/**
+ * Decides what to do with an existing ledger row for the same payload hash.
+ *
+ *   fresh              — no prior row; claim it.
+ *   duplicate_terminal — already finished; short-circuit, do not reprocess.
+ *   retry_stale        — a 'processing' claim older than the lease, or a prior
+ *                        retryable failure; safe to take over.
+ *   in_flight          — a 'processing' claim still within the lease. Another
+ *                        invocation likely owns it right now, so this delivery
+ *                        must NOT run the business logic concurrently.
+ *
+ * Splitting 'in_flight' out from 'retry_stale' is the point: treating every
+ * 'processing' row as replayable would let two live deliveries of the same
+ * payload dispatch at the same time.
+ */
+export function decideClaim(
+  existing: { processing_status?: string | null; received_at?: string | null } | null | undefined,
+  now: number = Date.now(),
+): ClaimDecision {
+  if (!existing) return "fresh";
+
+  const status = existing.processing_status;
+  if (isTerminalLedgerStatus(status)) return "duplicate_terminal";
+
+  if (status === "processing") {
+    const receivedAt = existing.received_at ? Date.parse(existing.received_at) : NaN;
+    // An unparseable/missing timestamp cannot prove the claim is live, and
+    // stranding the event forever is worse than a re-attempt that business
+    // idempotency will absorb.
+    if (Number.isNaN(receivedAt)) return "retry_stale";
+    return now - receivedAt > PROCESSING_LEASE_MS ? "retry_stale" : "in_flight";
+  }
+
+  // failed_retryable, 'pending', or any unrecognised non-terminal state.
+  return "retry_stale";
+}

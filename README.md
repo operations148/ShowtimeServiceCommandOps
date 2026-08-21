@@ -3,7 +3,7 @@
 A GHL-integrated work order and field operations platform — built for Showtime Pool Service,
 designed to scale as a white-label add-on for local service businesses on GoHighLevel.
 
-**Live:** `https://serviceops-ghl-workorders.vercel.app`
+**Live:** `https://serviceops-ghl-workorders-chi.vercel.app`
 
 ---
 
@@ -34,7 +34,7 @@ Version: 2021-07-28
 
 ### Inbound (GHL → ServiceOps)
 GHL sends stage-change events via **Automations → Workflows → Custom Webhook action**.
-- Webhook URL: `https://serviceops-ghl-workorders.vercel.app/api/ghl/webhooks`
+- Webhook URL: `https://serviceops-ghl-workorders-chi.vercel.app/api/ghl/webhooks`
 - Auth header in workflow action: `Authorization: Bearer <GHL_WEBHOOK_SECRET>`
 - Fallback if Custom Webhook unavailable: use Webhook/Outbound Webhook + `?token=<GHL_WEBHOOK_SECRET>` in URL
 
